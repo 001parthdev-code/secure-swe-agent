@@ -27,16 +27,3 @@ Record OS version, Rust version (`rustc --version`), exact commands, test counts
 
 ## Exit criteria
 All tests pass on both platforms; junction behavior is exercised and verified; remaining race-condition weakness is eliminated with atomic OS-specific file opening or E1 is explicitly classified as a non-security-grade prototype. Until then E1 is **open**.
-
-## Iteration 2 observed Windows results
-- `cargo fmt --check`: no reported differences.
-- `cargo test`: 9 passed, 0 failed.
-- `cargo clippy --all-targets -- -D warnings`: passed.
-- Junction test printed `The filename, directory name, or volume label syntax is incorrect.` despite returning `ok`. **H3 not verified.**
-
-## Iteration 3 verification protocol
-- Apply the patch, run `cargo fmt` once, then `cargo fmt --check`, `cargo test`, and `cargo clippy --all-targets -- -D warnings`.
-- The Windows junction test now **fails** if it cannot construct the test junction. A setup failure must be investigated; it is not evidence of an Enforcer bypass or of protection.
-- Push to GitHub to trigger `.github/workflows/enforcer-ci.yml` on Windows and Ubuntu. The workflow uses `--locked`; ensure `enforcer/Cargo.lock` is committed if present locally. If absent, generate and commit it using `cargo generate-lockfile`.
-- Record OS versions, Rust versions, test output, and CI run URLs here.
-- **Do not mark E1 complete:** TOCTOU mitigation remains an open security requirement even if all CI jobs pass.

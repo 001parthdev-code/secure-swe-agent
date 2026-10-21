@@ -1,13 +1,13 @@
 use std::fs::{self, File};
 use std::io::{self, Read};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use crate::protocol::{ToolRequest, ToolResult};
 
 pub const MAX_READ_BYTES: u64 = 1024 * 1024;
 
 pub struct Policy {
-    workspace: PathBuf,
+    workspace: File,
 }
 
 impl Policy {
@@ -19,7 +19,18 @@ impl Policy {
                 "workspace is not a directory",
             ));
         }
-        Ok(Self { workspace: root })
+        #[cfg(windows)]
+        let workspace = {
+            use std::os::windows::fs::OpenOptionsExt;
+            // A directory handle must be opened with BACKUP_SEMANTICS.
+            fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(0x0200_0000)
+                .open(&root)?
+        };
+        #[cfg(not(windows))]
+        let workspace = File::open(&root)?;
+        Ok(Self { workspace })
     }
 
     pub fn evaluate(&self, request: ToolRequest) -> ToolResult {
@@ -43,26 +54,12 @@ impl Policy {
         {
             return denied();
         }
-        // Explicitly reject symlinks in every component. This is a best-effort
-        // portable check, NOT an atomic defense against concurrent path swaps.
-        let mut candidate = self.workspace.clone();
-        for component in relative.components() {
-            candidate.push(component.as_os_str());
-            match fs::symlink_metadata(&candidate) {
-                Ok(meta) if meta.file_type().is_symlink() => return denied(),
-                Ok(_) => (),
-                Err(e) => return file_error(e),
-            }
-        }
-        let resolved = match fs::canonicalize(&candidate) {
-            Ok(p) => p,
-            Err(e) => return file_error(e),
-        };
-        if !resolved.starts_with(&self.workspace) {
-            return denied();
-        }
-        let mut file = match File::open(&resolved) {
+        // Resolve relative to a retained directory handle, never via a second
+        // host-absolute pathname. The platform implementation rejects reparse
+        // points / symlinks during resolution.
+        let mut file = match crate::secure_fs::open_relative(&self.workspace, relative) {
             Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return denied(),
             Err(e) => return file_error(e),
         };
         let metadata = match file.metadata() {
@@ -115,6 +112,7 @@ fn file_error(e: io::Error) -> ToolResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn fixture() -> PathBuf {

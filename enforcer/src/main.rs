@@ -1,5 +1,6 @@
 mod policy;
 mod protocol;
+mod secure_fs;
 
 use policy::Policy;
 use protocol::{ToolRequest, ToolResult};
