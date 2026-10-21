@@ -1,3 +1,7 @@
+#[cfg(test)]
+mod e2_hardening_tests;
+#[cfg(test)]
+mod e2_tests;
 mod policy;
 mod protocol;
 mod secure_fs;

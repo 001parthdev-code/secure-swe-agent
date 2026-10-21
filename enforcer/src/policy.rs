@@ -5,6 +5,7 @@ use std::path::{Component, Path};
 use crate::protocol::{ToolRequest, ToolResult};
 
 pub const MAX_READ_BYTES: u64 = 1024 * 1024;
+pub const MAX_WRITE_BYTES: usize = 1024 * 1024;
 
 pub struct Policy {
     workspace: File,
@@ -36,11 +37,48 @@ impl Policy {
     pub fn evaluate(&self, request: ToolRequest) -> ToolResult {
         match request {
             ToolRequest::ReadFile { path } => self.read_file(&path),
+            ToolRequest::CreateFile { path, content } => self.write_file(&path, &content, false),
+            ToolRequest::ModifyFile { path, content } => self.write_file(&path, &content, true),
             ToolRequest::WriteFile { .. } | ToolRequest::RunCommand { .. } => {
                 ToolResult::PolicyDenied {
                     reason: "capability not enabled in E1".into(),
                 }
             }
+        }
+    }
+
+    fn write_file(&self, path: &str, content: &str, modify: bool) -> ToolResult {
+        let relative = Path::new(path);
+        if path.is_empty()
+            || relative.is_absolute()
+            || relative
+                .components()
+                .any(|c| !matches!(c, Component::Normal(_)))
+        {
+            return denied();
+        }
+        if content.len() > MAX_WRITE_BYTES {
+            return ToolResult::ResourceLimit {
+                reason: "write exceeds 1 MiB limit".into(),
+            };
+        }
+        match crate::secure_fs::write_relative(
+            &self.workspace,
+            relative,
+            content.as_bytes(),
+            modify,
+        ) {
+            Ok(()) => ToolResult::Success {
+                output: if modify { "modified" } else { "created" }.into(),
+            },
+            Err(e)
+                if e.kind() == io::ErrorKind::PermissionDenied
+                    || e.kind() == io::ErrorKind::AlreadyExists
+                    || e.kind() == io::ErrorKind::NotFound =>
+            {
+                denied()
+            }
+            Err(e) => file_error(e),
         }
     }
 

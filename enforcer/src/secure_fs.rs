@@ -8,4 +8,4 @@ mod platform;
 #[cfg(not(any(target_os = "linux", windows)))]
 compile_error!("E1 secure filesystem access supports only Windows and Linux");
 
-pub(crate) use platform::open_relative;
+pub(crate) use platform::{open_relative, write_relative};

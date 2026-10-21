@@ -78,3 +78,116 @@ mod tests {
         std::fs::remove_dir_all(base).unwrap();
     }
 }
+
+/// E2: stage complete bytes in an unlinked-resistant unique file in the authorized parent.
+/// Commit via renameat2; NOREPLACE for create, replace for modify.
+/// The destination's existing object is checked with O_NOFOLLOW before replacement.
+pub(crate) fn write_relative(
+    root: &File,
+    relative: &Path,
+    bytes: &[u8],
+    modify: bool,
+) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::ffi::OsStrExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    const O_NOFOLLOW: i32 = 0o400000;
+    const O_WRONLY: i32 = 1;
+    const O_CREAT: i32 = 0o100;
+    const O_EXCL: i32 = 0o200;
+    const RENAME_NOREPLACE: u32 = 1;
+    let name = relative
+        .file_name()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::PermissionDenied))?;
+    let parent = relative
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let directory = if parent == Path::new(".") {
+        root.try_clone()?
+    } else {
+        open_relative(root, parent)?
+    };
+    if !directory.metadata()?.is_dir() {
+        return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+    }
+    let name = CString::new(name.as_bytes())
+        .map_err(|_| io::Error::from(io::ErrorKind::PermissionDenied))?;
+    if modify {
+        let fd = unsafe {
+            libc_openat(
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                O_NOFOLLOW | O_NONBLOCK as i32,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let target = unsafe { File::from_raw_fd(fd) };
+        if !target.metadata()?.is_file() {
+            return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+        }
+    }
+    let (temp_name, mut temp) = loop {
+        let id = SEQ.fetch_add(1, Ordering::Relaxed);
+        let candidate = CString::new(format!(".enforcer-e2-{}-{id}", std::process::id())).unwrap();
+        let fd = unsafe {
+            libc_openat(
+                directory.as_raw_fd(),
+                candidate.as_ptr(),
+                O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
+                0o600,
+            )
+        };
+        if fd >= 0 {
+            break (candidate, unsafe { File::from_raw_fd(fd) });
+        }
+        let err = io::Error::last_os_error();
+        if err.kind() != io::ErrorKind::AlreadyExists {
+            return Err(err);
+        }
+    };
+    let result = (|| {
+        temp.write_all(bytes)?;
+        temp.sync_all()?;
+        // No path-based resolution: both names are relative to the pinned parent fd.
+        let flags = if modify { 0 } else { RENAME_NOREPLACE };
+        let status = unsafe {
+            libc_renameat2(
+                directory.as_raw_fd(),
+                temp_name.as_ptr(),
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                flags,
+            )
+        };
+        if status != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        directory.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        unsafe {
+            libc_unlinkat(directory.as_raw_fd(), temp_name.as_ptr(), 0);
+        }
+    }
+    result
+}
+unsafe extern "C" {
+    #[link_name = "openat"]
+    fn libc_openat(fd: c_int, path: *const c_char, flags: c_int, mode: c_int) -> c_int;
+    #[link_name = "renameat2"]
+    fn libc_renameat2(
+        oldfd: c_int,
+        old: *const c_char,
+        newfd: c_int,
+        new: *const c_char,
+        flags: u32,
+    ) -> c_int;
+    #[link_name = "unlinkat"]
+    fn libc_unlinkat(fd: c_int, path: *const c_char, flags: c_int) -> c_int;
+}

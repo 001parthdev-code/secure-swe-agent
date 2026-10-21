@@ -10,6 +10,10 @@ pub enum ToolRequest {
 
     WriteFile { path: String, content: String },
 
+    CreateFile { path: String, content: String },
+
+    ModifyFile { path: String, content: String },
+
     RunCommand { command: String },
 }
 
