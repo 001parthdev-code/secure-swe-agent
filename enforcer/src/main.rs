@@ -49,7 +49,7 @@ fn main() {
         let mut line = Vec::new();
         let read = match input
             .by_ref()
-            .take((MAX_REQUEST_BYTES + 2) as u64)
+            .take((MAX_REQUEST_BYTES + 3) as u64)
             .read_until(b'\n', &mut line)
         {
             Ok(n) => n,
@@ -61,7 +61,7 @@ fn main() {
         if read == 0 {
             break;
         }
-        let result = if line.len() > MAX_REQUEST_BYTES + 2 && !line.ends_with(b"\n") {
+        let result = if line.len() == MAX_REQUEST_BYTES + 3 && !line.ends_with(b"\n") {
             // Drain the rest of the oversized request before processing another.
             let mut drain = Vec::new();
             loop {
@@ -132,5 +132,23 @@ mod security_tests {
             ));
         }
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod framing_boundary_tests {
+    use super::*;
+    #[test]
+    fn oversized_request_with_crlf_is_rejected() {
+        let dir = std::env::temp_dir().join(format!("enforcer-frame-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let policy = Policy::new(&dir).unwrap();
+        let mut oversized = vec![b' '; MAX_REQUEST_BYTES + 1];
+        oversized.extend_from_slice(b"\r\n");
+        assert!(matches!(
+            handle(&oversized, &policy),
+            ToolResult::InvalidRequest { .. }
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

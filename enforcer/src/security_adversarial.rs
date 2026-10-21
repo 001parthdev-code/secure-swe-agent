@@ -147,3 +147,24 @@ fn workspace_handle_survives_path_rename_where_supported() {
         );
     }
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_rejects_ads_and_ambiguous_components() {
+    let f = Fixture::new("windows-components");
+    let root = f.0.join("workspace");
+    fs::create_dir_all(root.join("sub")).unwrap();
+    fs::write(root.join("sub/safe.txt"), "SAFE").unwrap();
+    let policy = Policy::new(&root).unwrap();
+    for path in [
+        "sub/safe.txt:stream",
+        "sub\\safe.txt:stream",
+        "sub./safe.txt",
+        "sub /safe.txt",
+    ] {
+        assert!(
+            !matches!(read(&policy, path), ToolResult::Success { .. }),
+            "ambiguous component accepted: {path}"
+        );
+    }
+}

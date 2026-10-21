@@ -1,9 +1,11 @@
-//! Windows NT handle-relative open. No Win32 pathname fallback.
-use std::ffi::c_void;
+//! Windows: open one path component at a time relative to retained directory handles.
+//! Never follow reparse points and never re-resolve an absolute pathname.
+use std::ffi::{OsStr, c_void};
 use std::fs::File;
 use std::io;
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
-use std::path::Path;
+use std::path::{Component, Path};
 
 #[repr(C)]
 struct UnicodeString {
@@ -63,43 +65,46 @@ struct ByHandleFileInformation {
 unsafe extern "system" {
     fn GetFileInformationByHandle(handle: *mut c_void, info: *mut ByHandleFileInformation) -> i32;
 }
-const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+const REPARSE: u32 = 0x400;
 const OBJ_CASE_INSENSITIVE: u32 = 0x40;
 const OBJ_DONT_REPARSE: u32 = 0x1000;
-const FILE_READ_DATA: u32 = 0x0001;
-const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+const FILE_READ_DATA: u32 = 1;
+const FILE_TRAVERSE: u32 = 0x20;
+const FILE_READ_ATTRIBUTES: u32 = 0x80;
 const SYNCHRONIZE: u32 = 0x0010_0000;
-const FILE_SHARE_READ_WRITE_DELETE: u32 = 0x7;
+const SHARE_ALL: u32 = 7;
 const FILE_OPEN: u32 = 1;
-const FILE_NON_DIRECTORY_FILE: u32 = 0x40;
-const FILE_SYNCHRONOUS_IO_NONALERT: u32 = 0x20;
-const FILE_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+const DIRECTORY: u32 = 1;
+const NON_DIRECTORY: u32 = 0x40;
+const SYNCHRONOUS: u32 = 0x20;
+const OPEN_REPARSE: u32 = 0x0020_0000;
 
-pub(crate) fn open_relative(root: &File, relative: &Path) -> io::Result<File> {
-    use std::os::windows::ffi::OsStrExt;
-    // NT relative object names use backslashes. The caller rejects parent and
-    // rooted components; embedded NULs and ADS syntax are denied here.
-    let name = relative.as_os_str().to_string_lossy().replace('/', "\\");
-    if name.contains(':') || name.contains('\0') {
+fn open_component(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
+    let wide: Vec<u16> = name.encode_wide().collect();
+    // A component must be a single, unambiguous NT filename, not a path or ADS.
+    if wide.is_empty()
+        || wide.iter().any(|&c| matches!(c, 0 | 47 | 58 | 92))
+        || matches!(wide.last(), Some(32 | 46))
+    {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "invalid NT relative path",
+            "invalid path component",
         ));
     }
-    let mut wide: Vec<u16> = std::ffi::OsStr::new(&name).encode_wide().collect();
-    let len = wide
+    let byte_len = wide
         .len()
         .checked_mul(2)
         .and_then(|n| u16::try_from(n).ok())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::PermissionDenied, "path too long"))?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::PermissionDenied, "component too long"))?;
+    let mut wide = wide;
     let mut unicode = UnicodeString {
-        length: len,
-        maximum_length: len,
+        length: byte_len,
+        maximum_length: byte_len,
         buffer: wide.as_mut_ptr(),
     };
     let mut attrs = ObjectAttributes {
         length: std::mem::size_of::<ObjectAttributes>() as u32,
-        root_directory: root.as_raw_handle(),
+        root_directory: parent.as_raw_handle(),
         object_name: &mut unicode,
         attributes: OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE,
         security_descriptor: std::ptr::null_mut(),
@@ -110,19 +115,26 @@ pub(crate) fn open_relative(root: &File, relative: &Path) -> io::Result<File> {
         information: 0,
     };
     let mut handle: *mut c_void = std::ptr::null_mut();
-    // SAFETY: all pointers refer to live stack allocations, root owns a valid
-    // directory handle, and the kernel initializes handle only on success.
+    let access = FILE_READ_ATTRIBUTES
+        | SYNCHRONIZE
+        | if directory {
+            FILE_TRAVERSE
+        } else {
+            FILE_READ_DATA
+        };
+    let options = SYNCHRONOUS | OPEN_REPARSE | if directory { DIRECTORY } else { NON_DIRECTORY };
+    // SAFETY: all pointers refer to live storage, and the parent owns a valid handle.
     let status = unsafe {
         NtCreateFile(
             &mut handle,
-            FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            access,
             &mut attrs,
             &mut iosb,
             std::ptr::null_mut(),
             0,
-            FILE_SHARE_READ_WRITE_DELETE,
+            SHARE_ALL,
             FILE_OPEN,
-            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
+            options,
             std::ptr::null_mut(),
             0,
         )
@@ -136,21 +148,45 @@ pub(crate) fn open_relative(root: &File, relative: &Path) -> io::Result<File> {
     if handle.is_null() {
         return Err(io::Error::other("NT open returned null handle"));
     }
-    // SAFETY: NtCreateFile returned a new owned HANDLE.
+    // SAFETY: successful NtCreateFile transfers ownership of the handle.
     let file = unsafe { File::from_raw_handle(handle) };
     let mut info = std::mem::MaybeUninit::<ByHandleFileInformation>::uninit();
-    // SAFETY: file owns a live handle; the API writes the output on success.
-    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), info.as_mut_ptr()) };
-    if ok == 0 {
+    // SAFETY: the handle is live and the API initializes info on success.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), info.as_mut_ptr()) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    // SAFETY: successful GetFileInformationByHandle initialized info.
+    // SAFETY: the API call above succeeded.
     let info = unsafe { info.assume_init() };
-    if info.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+    if info.attributes & REPARSE != 0 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "reparse point denied",
         ));
     }
     Ok(file)
+}
+
+pub(crate) fn open_relative(root: &File, relative: &Path) -> io::Result<File> {
+    let components: Vec<_> = relative.components().collect();
+    if components.is_empty()
+        || components
+            .iter()
+            .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "invalid relative path",
+        ));
+    }
+    // Each child is opened relative to the *previous opened handle*, not a pathname.
+    // Renaming or replacing an ancestor cannot redirect subsequent resolution.
+    let mut parent = root.try_clone()?;
+    for (index, component) in components.iter().enumerate() {
+        parent = open_component(
+            &parent,
+            component.as_os_str(),
+            index + 1 != components.len(),
+        )?;
+    }
+    Ok(parent)
 }
