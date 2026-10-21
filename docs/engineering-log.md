@@ -17,3 +17,10 @@ Status terms: **observed**, **pending**, **hypothesis**, **known limitation**. A
 - **Changes:** `main.rs` trims LF/CRLF before parsing and adjusts the oversized-line threshold; adds request validation tests. `policy.rs` adds path escape tests and Windows-only drive/UNC/junction tests. Documentation structure established.
 - **Verification:** NOT RUN in the assistant environment (Rust toolchain unavailable). Run commands in `docs/experiments/E1-security-validation.md` on Windows and Linux.
 - **Open questions:** Junction test may expose a real bypass. Race-free file opening remains unsolved. Do not advance to E2 on the strength of these tests alone.
+
+## E1 final hardening candidate — 2026-10-21
+- **Assumption:** Untrusted paths can contain intermediate reparse points; the workspace is provisioned by a trusted operator.
+- **Hypothesis:** Opening one NT component at a time relative to retained handles closes the intermediate-reparse gap.
+- **Change:** Replaced multi-component Windows native open with handle-relative traversal; tightened JSONL oversized-frame detection; added targeted regressions.
+- **Observation:** Source patch prepared from uploaded repository; no local Rust toolchain available to execute tests.
+- **Result:** Pending Windows/Linux CI and native API review. E1 **not yet accepted**.
