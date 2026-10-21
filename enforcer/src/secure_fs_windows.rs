@@ -209,6 +209,7 @@ const DELETE_ACCESS: u32 = 0x0001_0000;
 const FILE_WRITE_DATA: u32 = 2;
 const FILE_CREATE: u32 = 2;
 const FILE_RENAME_INFORMATION: u32 = 10;
+const FILE_DISPOSITION_INFORMATION: u32 = 13;
 
 fn nt_create_child(parent: &File, name: &OsStr) -> io::Result<File> {
     let mut wide: Vec<u16> = name.encode_wide().collect();
@@ -262,6 +263,34 @@ fn nt_create_child(parent: &File, name: &OsStr) -> io::Result<File> {
     Ok(unsafe { File::from_raw_handle(handle) })
 }
 
+// Mark the staged file for deletion through its existing handle. Never reopen
+// its attacker-visible pathname during cleanup.
+fn discard_staged_file(temp: &File) -> io::Result<()> {
+    let mut disposition: u8 = 1;
+    let mut iosb = IoStatusBlock {
+        status: 0,
+        information: 0,
+    };
+    // SAFETY: temp owns a live handle with DELETE access; disposition is a
+    // one-byte FILE_DISPOSITION_INFORMATION structure for class 13.
+    let status = unsafe {
+        NtSetInformationFile(
+            temp.as_raw_handle(),
+            &mut iosb,
+            (&mut disposition as *mut u8).cast::<c_void>(),
+            1,
+            FILE_DISPOSITION_INFORMATION,
+        )
+    };
+    if status < 0 {
+        return Err(io::Error::other(format!(
+            "NT disposition failed: 0x{:08x}",
+            status as u32
+        )));
+    }
+    Ok(())
+}
+
 fn nt_rename_child(temp: &File, parent: &File, name: &OsStr, replace: bool) -> io::Result<()> {
     let wide: Vec<u16> = name.encode_wide().collect();
     let name_bytes = wide
@@ -313,6 +342,13 @@ pub(crate) fn write_relative(
     bytes: &[u8],
     modify: bool,
 ) -> io::Result<()> {
+    // Defense in depth: never commit by pathname when exact target identity is required.
+    if modify {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "identity-safe modification unavailable",
+        ));
+    }
     let components: Vec<_> = relative.components().collect();
     if components.is_empty()
         || components
@@ -362,10 +398,15 @@ pub(crate) fn write_relative(
         temp.sync_all()?;
         nt_rename_child(&temp, &parent, name, modify)
     })();
-    if result.is_err() {
-        // Best-effort cleanup is deliberately omitted here: deletion by a
-        // pathname could race with an attacker-controlled replacement.
-        // The temporary file contains only request-supplied content.
+    if let Err(write_error) = result {
+        // Cleanup is handle-based, so path replacement cannot redirect deletion.
+        // Surface cleanup failure rather than silently leaking staged content.
+        if let Err(cleanup_error) = discard_staged_file(&temp) {
+            return Err(io::Error::other(format!(
+                "write failed ({write_error}); staged-file cleanup failed ({cleanup_error})"
+            )));
+        }
+        return Err(write_error);
     }
-    result
+    Ok(())
 }

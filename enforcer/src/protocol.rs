@@ -6,15 +6,36 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolRequest {
-    ReadFile { path: String },
+    ReadFile {
+        path: String,
+    },
 
-    WriteFile { path: String, content: String },
+    WriteFile {
+        path: String,
+        content: String,
+    },
 
-    CreateFile { path: String, content: String },
+    CreateFile {
+        path: String,
+        content: String,
+    },
 
-    ModifyFile { path: String, content: String },
+    ModifyFile {
+        path: String,
+        content: String,
+    },
 
-    RunCommand { command: String },
+    /// Future transaction API: requires an opaque version token issued by the Enforcer.
+    /// Remains fail-closed until OS-enforced mutation isolation is implemented.
+    ModifyFileVersioned {
+        path: String,
+        content: String,
+        expected_version: String,
+    },
+
+    RunCommand {
+        command: String,
+    },
 }
 
 /// Result returned by the trusted enforcer.
@@ -53,6 +74,17 @@ pub enum ToolResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn versioned_modify_requires_expected_version() {
+        let valid = r#"{"action":"modify_file_versioned","path":"src/main.rs","content":"new","expected_version":"v1"}"#;
+        assert!(matches!(
+            serde_json::from_str::<ToolRequest>(valid),
+            Ok(ToolRequest::ModifyFileVersioned { .. })
+        ));
+        let missing = r#"{"action":"modify_file_versioned","path":"src/main.rs","content":"new"}"#;
+        assert!(serde_json::from_str::<ToolRequest>(missing).is_err());
+    }
 
     #[test]
     fn deserialize_read_file_request() {

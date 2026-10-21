@@ -88,6 +88,13 @@ pub(crate) fn write_relative(
     bytes: &[u8],
     modify: bool,
 ) -> io::Result<()> {
+    // Defense in depth: never commit by pathname when exact target identity is required.
+    if modify {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "identity-safe modification unavailable",
+        ));
+    }
     use std::io::Write;
     use std::os::unix::ffi::OsStrExt;
     use std::sync::atomic::{AtomicU64, Ordering};

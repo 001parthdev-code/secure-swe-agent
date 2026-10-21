@@ -39,6 +39,9 @@ impl Policy {
             ToolRequest::ReadFile { path } => self.read_file(&path),
             ToolRequest::CreateFile { path, content } => self.write_file(&path, &content, false),
             ToolRequest::ModifyFile { path, content } => self.write_file(&path, &content, true),
+            ToolRequest::ModifyFileVersioned { .. } => ToolResult::PolicyDenied {
+                reason: "versioned modifications unavailable until workspace isolation and atomic commit are verified".into(),
+            },
             ToolRequest::WriteFile { .. } | ToolRequest::RunCommand { .. } => {
                 ToolResult::PolicyDenied {
                     reason: "capability not enabled in E1".into(),
@@ -48,6 +51,13 @@ impl Policy {
     }
 
     fn write_file(&self, path: &str, content: &str, modify: bool) -> ToolResult {
+        // No supported atomic compare-and-replace by opened destination identity.
+        // Do not fall back to pathname-based replacement.
+        if modify {
+            return ToolResult::PolicyDenied {
+                reason: "modify_file disabled: object-identity-safe commit unavailable".into(),
+            };
+        }
         let relative = Path::new(path);
         if path.is_empty()
             || relative.is_absolute()

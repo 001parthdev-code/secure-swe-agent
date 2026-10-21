@@ -43,7 +43,7 @@ fn rejected_writes_preserve_existing_content() {
 }
 
 #[test]
-fn nested_modification_replaces_complete_content() {
+fn nested_modification_fails_closed_and_preserves_content() {
     let base = std::env::temp_dir().join(format!(
         "e2-replace-{}-{}",
         std::process::id(),
@@ -60,12 +60,12 @@ fn nested_modification_replaces_complete_content() {
         content: "new".into(),
     });
     assert!(
-        matches!(result, ToolResult::Success { .. }),
-        "modification should succeed: {result:?}"
+        matches!(result, ToolResult::PolicyDenied { .. }),
+        "unsafe modification must be denied: {result:?}"
     );
     assert_eq!(
         fs::read_to_string(base.join("sub/file.txt")).unwrap(),
-        "new"
+        "original long content"
     );
     fs::remove_dir_all(base).unwrap();
 }

@@ -42,12 +42,9 @@ fn separate_create_and_modify_capabilities() {
     assert_eq!(fs::read_to_string(root.join("sub/a.txt")).unwrap(), "first");
     assert!(matches!(
         modify("sub/a.txt", "second"),
-        ToolResult::Success { .. }
+        ToolResult::PolicyDenied { .. }
     ));
-    assert_eq!(
-        fs::read_to_string(root.join("sub/a.txt")).unwrap(),
-        "second"
-    );
+    assert_eq!(fs::read_to_string(root.join("sub/a.txt")).unwrap(), "first");
     assert!(matches!(
         create("../outside", "x"),
         ToolResult::PolicyDenied { .. }
