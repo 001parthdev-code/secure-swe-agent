@@ -4,20 +4,13 @@ use serde::{Deserialize, Serialize};
 ///
 /// Deserialized from JSON received across the trust boundary.
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(tag = "action", rename_all = "snake_case")]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolRequest {
-    ReadFile {
-        path: String,
-    },
+    ReadFile { path: String },
 
-    WriteFile {
-        path: String,
-        content: String,
-    },
+    WriteFile { path: String, content: String },
 
-    RunCommand {
-        command: String,
-    },
+    RunCommand { command: String },
 }
 
 /// Result returned by the trusted enforcer.
@@ -47,6 +40,7 @@ pub enum ToolResult {
         error: String,
     },
 
+    #[allow(dead_code)]
     InternalError {
         error: String,
     },
@@ -65,8 +59,7 @@ mod tests {
         }
         "#;
 
-        let request: ToolRequest =
-            serde_json::from_str(json).expect("request should deserialize");
+        let request: ToolRequest = serde_json::from_str(json).expect("request should deserialize");
 
         assert_eq!(
             request,
@@ -82,8 +75,7 @@ mod tests {
             reason: "path escapes workspace".to_string(),
         };
 
-        let json =
-            serde_json::to_string(&result).expect("result should serialize");
+        let json = serde_json::to_string(&result).expect("result should serialize");
 
         let value: serde_json::Value =
             serde_json::from_str(&json).expect("serialized result should be JSON");
