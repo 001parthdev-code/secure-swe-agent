@@ -3,9 +3,6 @@ use crate::policy::Policy;
 use crate::protocol::{ToolRequest, ToolResult};
 use std::fs;
 use std::path::PathBuf;
-
-
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct Fixture(PathBuf);
