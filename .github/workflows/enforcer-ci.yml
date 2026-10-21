@@ -1,0 +1,37 @@
+name: Rust Enforcer CI
+on:
+  push:
+    paths:
+      - 'enforcer/**'
+      - '.github/workflows/enforcer-ci.yml'
+  pull_request:
+    paths:
+      - 'enforcer/**'
+      - '.github/workflows/enforcer-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: ${{ matrix.os }} / stable
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: enforcer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Unit and adversarial tests
+        run: cargo test --locked
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
