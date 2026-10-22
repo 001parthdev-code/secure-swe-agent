@@ -24,3 +24,11 @@ Status terms: **observed**, **pending**, **hypothesis**, **known limitation**. A
 - **Change:** Replaced multi-component Windows native open with handle-relative traversal; tightened JSONL oversized-frame detection; added targeted regressions.
 - **Observation:** Source patch prepared from uploaded repository; no local Rust toolchain available to execute tests.
 - **Result:** Pending Windows/Linux CI and native API review. E1 **not yet accepted**.
+
+## 2026-10-22 — Isolation preflight foundation (implementation candidate)
+- **Problem:** The eight-crate migration created an empty isolation crate, but no OS-enforced mutation boundary exists.
+- **Assumption:** Same-user processes can bypass ordinary workspace mode-bit restrictions; directory metadata alone is not proof of isolation.
+- **Hypothesis:** An explicit fail-closed isolation readiness contract prevents the transaction engine from mistaking a private directory for an enforced boundary.
+- **Change:** Added `inspect_workspace`, immutable inspection findings, and a mutation-readiness check that refuses unverified workspaces. Added cross-platform tests and ADR-004.
+- **Verification:** Rust compilation, tests, and CI pending. No native OS sandbox has been implemented.
+- **Next:** Implement separate-identity OS isolation backends and adversarial direct-write tests before enabling versioned modification.
