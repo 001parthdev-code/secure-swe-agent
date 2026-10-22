@@ -1,8 +1,11 @@
-//! Workspace isolation preflight and explicit fail-closed readiness contract.
-//!
-//! This crate does not create a sandbox or grant mutation authority. It checks
-//! limited prerequisites and refuses to attest isolation without an OS-backed
-//! credential boundary between the Enforcer and untrusted processes.
+#[cfg(target_os = "linux")]
+pub mod linux;
+
+// Workspace isolation preflight and explicit fail-closed readiness contract.
+//
+// This crate does not create a sandbox or grant mutation authority. It checks
+// limited prerequisites and refuses to attest isolation without an OS-backed
+// credential boundary between the Enforcer and untrusted processes.
 
 use std::fs;
 use std::io;
