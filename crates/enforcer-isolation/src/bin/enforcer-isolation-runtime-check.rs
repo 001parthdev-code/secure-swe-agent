@@ -17,10 +17,10 @@ fn main() -> std::io::Result<()> {
     }
 
     let args: Vec<_> = std::env::args_os().collect();
-    if args.len() != 4 {
+    if args.len() != 5 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: enforcer-isolation-runtime-check PROBE_PATH UID GID",
+            "usage: enforcer-isolation-runtime-check PROBE_PATH UID GID SECURE_PARENT",
         ));
     }
     let uid: u32 = args[2]
@@ -31,9 +31,15 @@ fn main() -> std::io::Result<()> {
         .to_string_lossy()
         .parse()
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid GID"))?;
-    let base = Path::new("/opt");
-    if !base.is_dir() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "/opt must exist"));
+    // The caller provisions a trusted parent outside group/world-writable
+    // ancestors. Do not silently fall back to /tmp or another directory.
+    let base = fs::canonicalize(Path::new(&args[4]))?;
+    let parent_meta = fs::symlink_metadata(&base)?;
+    if !parent_meta.is_dir() || parent_meta.permissions().mode() & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "secure parent must be a private directory",
+        ));
     }
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
