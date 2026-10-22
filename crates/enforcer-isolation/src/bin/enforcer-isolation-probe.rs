@@ -3,7 +3,6 @@
 fn main() {
     use std::fs::OpenOptions;
     use std::io::ErrorKind;
-    use std::os::unix::fs::MetadataExt;
     let mut args = std::env::args_os().skip(1);
     let Some(path) = args.next() else {
         std::process::exit(64)
