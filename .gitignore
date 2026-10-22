@@ -1,0 +1,106 @@
+# ==========================================
+# Secure SWE Agent — Git Ignore
+# ==========================================
+
+# Rust build artifacts
+/target/
+**/target/
+*.rs.bk
+
+# Legacy Enforcer (retired)
+/enforcer/
+
+# Python environments
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+secrets/
+credentials/
+
+# Local configuration
+*.local.toml
+*.local.json
+config.local.*
+!.cargo/config.toml
+
+# IDE and editor files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+.idea/
+*.swp
+*.swo
+*~
+.history/
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+Desktop.ini
+$RECYCLE.BIN/
+*.stackdump
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.nfs*
+
+# Logs and runtime artifacts
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.temp
+*.pid
+
+# Test and experiment artifacts
+test-results/
+artifacts/
+sandbox/
+sandboxes/
+workspaces/
+scratch/
+experiments/output/
+benchmarks/results/
+
+# Generated archives
+*.zip
+*.tar
+*.tar.gz
+*.7z
+
+# Preserve Cargo.lock for reproducible builds
+!Cargo.lock
+
+# Preserve source, tests, documentation,
+# CI workflows, and architecture records
