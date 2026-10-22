@@ -7,6 +7,8 @@ mod protocol;
 mod secure_fs;
 #[cfg(test)]
 mod security_adversarial;
+#[cfg(test)]
+mod transaction;
 
 use policy::Policy;
 use protocol::{ToolRequest, ToolResult};
