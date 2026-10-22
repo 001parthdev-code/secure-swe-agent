@@ -1,3 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/enforcer-core", "crates/enforcer-protocol", "crates/enforcer-fs", "crates/enforcer-isolation", "crates/enforcer-transaction", "crates/enforcer-execution", "crates/enforcer-audit", "crates/enforcer-cli"]
+members = [
+    "crates/enforcer-core",
+    "crates/enforcer-protocol",
+    "crates/enforcer-fs",
+    "crates/enforcer-isolation",
+    "crates/enforcer-transaction",
+    "crates/enforcer-execution",
+    "crates/enforcer-audit",
+    "crates/enforcer-cli",
+]
