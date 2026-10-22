@@ -32,3 +32,10 @@ Status terms: **observed**, **pending**, **hypothesis**, **known limitation**. A
 - **Change:** Added `inspect_workspace`, immutable inspection findings, and a mutation-readiness check that refuses unverified workspaces. Added cross-platform tests and ADR-004.
 - **Verification:** Rust compilation, tests, and CI pending. No native OS sandbox has been implemented.
 - **Next:** Implement separate-identity OS isolation backends and adversarial direct-write tests before enabling versioned modification.
+
+## 2026-10-22 — Windows DACL preflight (implementation candidate)
+- **Assumption:** Workspace root may be attacker-influenced; a null DACL is unsafe.
+- **Hypothesis:** Native security-descriptor inspection can reject obviously unsafe roots without claiming isolation.
+- **Changes:** Added Windows-only `inspect_windows_dacl` with descriptor lifetime management and fail-closed root checks; added Windows-only tests and ADR-006.
+- **Verification:** Not executed in the authoring environment; Windows CI pending.
+- **Limitation:** No Windows restricted child process or effective-access denial has been verified. This is a preflight, not the promised full Windows isolation backend. `modify_file_versioned` remains denied.
