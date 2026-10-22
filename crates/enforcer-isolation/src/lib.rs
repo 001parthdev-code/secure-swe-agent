@@ -1,5 +1,7 @@
 #[cfg(target_os = "linux")]
 pub mod linux;
+#[cfg(target_os = "linux")]
+pub mod linux_process;
 
 // Workspace isolation preflight and explicit fail-closed readiness contract.
 //
