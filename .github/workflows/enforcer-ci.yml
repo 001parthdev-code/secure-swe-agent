@@ -26,3 +26,12 @@ jobs:
       - name: Execute privileged disposable negative-write experiment
         shell: bash
         run: bash scripts/verify-linux-isolation.sh
+
+  windows-isolation-negative-write:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Execute restricted-token negative-write experiment
+        shell: pwsh
+        run: ./scripts/verify-windows-isolation.ps1
