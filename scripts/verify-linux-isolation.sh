@@ -31,4 +31,10 @@ trap 'rm -rf -- "$probe_dir"' EXIT
 chmod 755 "$probe_dir"
 cp target/debug/enforcer-isolation-probe "$probe_dir/probe"
 chmod 755 "$probe_dir/probe"
-sudo -n target/debug/enforcer-isolation-runtime-check "$probe_dir/probe" "$uid" "$gid"
+# The privileged checker creates and removes only its own unique child.
+# The parent is intentionally persistent; never recursively delete a shared path.
+secure_parent="/var/lib/enforcer-isolation-test"
+sudo -n install -d -o root -g root -m 0700 "$secure_parent"
+
+sudo -n target/debug/enforcer-isolation-runtime-check \
+  "$probe_dir/probe" "$uid" "$gid" "$secure_parent"
