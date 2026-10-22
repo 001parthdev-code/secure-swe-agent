@@ -1,0 +1,9 @@
+[package]
+name = "enforcer-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+enforcer-core = { path = "../enforcer-core" }
+enforcer-protocol = { path = "../enforcer-protocol" }
+serde_json = "1.0.151"
