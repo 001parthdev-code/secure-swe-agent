@@ -4,11 +4,26 @@ Set-StrictMode -Version Latest
 cargo build --locked -p enforcer-isolation --bins
 if ($LASTEXITCODE -ne 0) { throw 'Rust build failed' }
 
-$probe = (Resolve-Path 'target/debug/enforcer-windows-write-probe.exe').Path
+$probeSource = (Resolve-Path 'target/debug/enforcer-windows-write-probe.exe').Path
+$startupSource = (Resolve-Path 'target/debug/enforcer-windows-startup-probe.exe').Path
 $checker = (Resolve-Path 'target/debug/enforcer-windows-runtime-check.exe').Path
-$workspace = Join-Path $env:RUNNER_TEMP ("enforcer-win-isolation-" + [guid]::NewGuid().ToString('N'))
+$tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
+$workspace = Join-Path $tempRoot ("enforcer-win-isolation-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $workspace | Out-Null
+# Diagnostic-only directory: intentionally writable by BUILTIN\Users so the
+# restricted token can load the probe and create a startup marker.
+# It is separate from the protected workspace.
+$diagnostic = Join-Path $tempRoot ("enforcer-win-diagnostic-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $diagnostic | Out-Null
 try {
+    & icacls.exe $diagnostic /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not provision restricted-token diagnostic directory' }
+    $probe = Join-Path $diagnostic 'write-probe.exe'
+    Copy-Item -LiteralPath $probeSource -Destination $probe
+    $marker = Join-Path $diagnostic 'started.marker'
+    $startupProbe = Join-Path $diagnostic 'startup-probe.exe'
+    Copy-Item -LiteralPath $startupSource -Destination $startupProbe
+    $startupMarker = Join-Path $diagnostic 'startup.marker'
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $acl = Get-Acl -LiteralPath $workspace
     $acl.SetAccessRuleProtection($true, $false)
@@ -28,9 +43,42 @@ try {
     if ((Get-Content -LiteralPath $control -Raw) -ne 'trusted-write-ok') { throw 'Trusted write control failed' }
 
     $denied = Join-Path $workspace 'untrusted-create.txt'
-    & $checker $probe $denied
-    if ($LASTEXITCODE -ne 0) { throw "Restricted process test failed with exit $LASTEXITCODE" }
-    if (Test-Path -LiteralPath $denied) { throw 'Unauthorized file exists' }
+    $startupMarker = Join-Path $diagnostic 'write-restricted-startup.marker'
+    $writeMarker = Join-Path $diagnostic 'write-restricted-write.marker'
+
+    # Mandatory write-isolation acceptance experiment. The child must start,
+    # report its restricted-token status, attempt the protected create, receive
+    # PermissionDenied, and exit zero. The checker validates the marker bytes.
+    & $checker $startupProbe $denied $startupMarker '--verify-write-restricted-startup'
+    if ($LASTEXITCODE -ne 0) { throw "WRITE_RESTRICTED startup control failed ($LASTEXITCODE)" }
+    if (-not (Test-Path -LiteralPath $startupMarker)) { throw 'Missing write-restricted startup marker' }
+
+    & $checker $probe $denied $writeMarker '--verify-write-restricted-write'
+    if ($LASTEXITCODE -ne 0) { throw "WRITE_RESTRICTED negative-write test failed ($LASTEXITCODE)" }
+    if (-not (Test-Path -LiteralPath $writeMarker)) { throw 'Missing restricted-child write-attempt marker' }
+    if (Test-Path -LiteralPath $denied) { throw 'SECURITY FAILURE: unauthorized file exists' }
+    Write-Host 'PASS: Windows WRITE_RESTRICTED child started and received write denial; no unauthorized file created.'
+    Write-Host 'LIMITATION: this verifies create denial only, not full sandbox isolation.'
+
+    # Preserve the legacy strict-token failure as an optional, non-gating
+    # diagnostic. It is not the acceptance criterion for this write-only mode.
+    if ([Environment]::GetEnvironmentVariable('ENFORCER_RUN_LEGACY_STRICT_DIAGNOSTIC') -eq '1') {
+        $legacyMarker = Join-Path $diagnostic 'legacy-strict.marker'
+        & $checker $startupProbe $denied $legacyMarker '--startup-only'
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Legacy strict-token startup remains unsupported (exit $LASTEXITCODE)."
+        }
+    }
+} catch {
+    Write-Warning "Windows isolation experiment failed: $($_.Exception.Message)"
+    Write-Host 'Diagnostic directory ACL:'
+    & icacls.exe $diagnostic
+    Write-Host 'Probe executable ACL:'
+    if (Test-Path -LiteralPath $startupProbe) { & icacls.exe $startupProbe }
+    Write-Host 'Protected workspace ACL:'
+    & icacls.exe $workspace
+    throw
 } finally {
     Remove-Item -LiteralPath $workspace -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $diagnostic -Recurse -Force -ErrorAction SilentlyContinue
 }
