@@ -88,7 +88,22 @@ if (-not [System.Linq.Enumerable]::SequenceEqual(
     throw 'Startup marker contents do not match expected handshake'
 }
 
-    & $checker $probe $denied $writeMarker '--verify-write-restricted-write'
+    $previousErrorAction = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+
+try {
+    & $checker $probe $denied $writeMarker '--verify-write-restricted-write' 2>&1 |
+        ForEach-Object { Write-Host "$_" }
+
+    $writeExit = $LASTEXITCODE
+}
+finally {
+    $ErrorActionPreference = $previousErrorAction
+}
+
+if ($writeExit -ne 0) {
+    throw "WRITE_RESTRICTED negative-write test failed ($writeExit)"
+}
     if ($LASTEXITCODE -ne 0) { throw "WRITE_RESTRICTED negative-write test failed ($LASTEXITCODE)" }
     Write-Host "Expected marker: $startupMarker"
 Write-Host "Files in diagnostic directory:"
