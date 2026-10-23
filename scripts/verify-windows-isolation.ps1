@@ -23,7 +23,6 @@ try {
     $marker = Join-Path $diagnostic 'started.marker'
     $startupProbe = Join-Path $diagnostic 'startup-probe.exe'
     Copy-Item -LiteralPath $startupSource -Destination $startupProbe
-    $startupMarker = Join-Path $diagnostic 'startup.marker'
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $acl = Get-Acl -LiteralPath $workspace
     $acl.SetAccessRuleProtection($true, $false)
@@ -49,13 +48,58 @@ try {
     # Mandatory write-isolation acceptance experiment. The child must start,
     # report its restricted-token status, attempt the protected create, receive
     # PermissionDenied, and exit zero. The checker validates the marker bytes.
-    & $checker $startupProbe $denied $startupMarker '--verify-write-restricted-startup'
-    if ($LASTEXITCODE -ne 0) { throw "WRITE_RESTRICTED startup control failed ($LASTEXITCODE)" }
-    if (-not (Test-Path -LiteralPath $startupMarker)) { throw 'Missing write-restricted startup marker' }
+    # Capture both stdout and stderr while preserving the native exit code.
+$previousErrorAction = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+
+try {
+    & $checker $startupProbe $denied $startupMarker '--verify-write-restricted-startup' 2>&1 |
+        ForEach-Object { Write-Host "$_" }
+
+    $checkerExit = $LASTEXITCODE
+}
+finally {
+    $ErrorActionPreference = $previousErrorAction
+}
+
+if ($checkerExit -ne 0) {
+    throw "WRITE_RESTRICTED negative-write test failed ($checkerExit)"
+}
+    Write-Host "Expected startup marker: $startupMarker"
+
+Write-Host "Diagnostic directory contents:"
+Get-ChildItem -LiteralPath $diagnostic -Force |
+    Select-Object Name, Length, FullName |
+    Format-Table -AutoSize
+
+if (-not (Test-Path -LiteralPath $startupMarker -PathType Leaf)) {
+    throw "Missing write-restricted startup marker: $startupMarker"
+}
+
+$markerBytes = [System.IO.File]::ReadAllBytes($startupMarker)
+$expectedBytes = [System.Text.Encoding]::ASCII.GetBytes(
+    'restricted-startup-ok'
+)
+
+if (-not [System.Linq.Enumerable]::SequenceEqual(
+    [byte[]]$markerBytes,
+    [byte[]]$expectedBytes
+)) {
+    throw 'Startup marker contents do not match expected handshake'
+}
 
     & $checker $probe $denied $writeMarker '--verify-write-restricted-write'
     if ($LASTEXITCODE -ne 0) { throw "WRITE_RESTRICTED negative-write test failed ($LASTEXITCODE)" }
-    if (-not (Test-Path -LiteralPath $writeMarker)) { throw 'Missing restricted-child write-attempt marker' }
+    Write-Host "Expected marker: $startupMarker"
+Write-Host "Files in diagnostic directory:"
+
+Get-ChildItem -LiteralPath $diagnostic -Force |
+    Select-Object Name, Length, FullName |
+    Format-Table -AutoSize
+
+if (-not (Test-Path -LiteralPath $startupMarker -PathType Leaf)) {
+    throw "Missing startup marker: $startupMarker"
+}
     if (Test-Path -LiteralPath $denied) { throw 'SECURITY FAILURE: unauthorized file exists' }
     Write-Host 'PASS: Windows WRITE_RESTRICTED child started and received write denial; no unauthorized file created.'
     Write-Host 'LIMITATION: this verifies create denial only, not full sandbox isolation.'
