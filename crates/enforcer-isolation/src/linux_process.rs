@@ -6,6 +6,15 @@
 use std::fs;
 use std::io;
 use std::os::unix::process::CommandExt;
+
+// Child setup uses only async-signal-safe syscalls before exec.
+unsafe extern "C" {
+    fn setgroups(size: usize, list: *const u32) -> i32;
+    fn setresgid(rgid: u32, egid: u32, sgid: u32) -> i32;
+    fn setresuid(ruid: u32, euid: u32, suid: u32) -> i32;
+    fn prctl(option: i32, ...) -> i32;
+}
+const PR_SET_NO_NEW_PRIVS: i32 = 38;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -68,13 +77,33 @@ pub fn probe_untrusted_create(
             "probe executable must be a file",
         ));
     }
-    // CommandExt::uid/gid configures child credentials before exec. No shell.
-    let output = Command::new(&binary)
-        .uid(untrusted_uid)
-        .gid(untrusted_gid)
+    // A privileged caller may carry supplementary groups and saved root IDs.
+    // Drop all of them before exec; fail closed if any syscall fails.
+    let mut command = Command::new(&binary);
+    command
         .arg(&candidate)
         .arg(untrusted_uid.to_string())
-        .output()?;
+        .arg(untrusted_gid.to_string());
+    // SAFETY: pre_exec closure performs only libc syscalls and constructs no
+    // allocations, locks or formatted errors in the forked child.
+    unsafe {
+        command.pre_exec(move || {
+            if setgroups(0, std::ptr::null()) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if setresgid(untrusted_gid, untrusted_gid, untrusted_gid) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if setresuid(untrusted_uid, untrusted_uid, untrusted_uid) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if prctl(PR_SET_NO_NEW_PRIVS, 1_usize, 0_usize, 0_usize, 0_usize) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let output = command.output()?;
     let expected = format!("ENFORCER_PROBE_DENIED:{untrusted_uid}\n");
     if !output.status.success() || output.stdout != expected.as_bytes() {
         return Err(io::Error::other(
