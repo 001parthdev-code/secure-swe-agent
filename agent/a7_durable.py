@@ -16,6 +16,7 @@ from secure_swe_agent.workflow_state import StateError, WorkflowStore
 from secure_swe_agent.git_broker import GitBrokerError
 from secure_swe_agent.approval import ApprovalError
 from secure_swe_agent.enforcer import EnforcerError
+from secure_swe_agent.recovery_evidence import filesystem_evidence, git_evidence, github_evidence
 
 RELATIVE = "workspace/calculator/calculator.py"
 
@@ -48,6 +49,24 @@ def parser() -> argparse.ArgumentParser:
             if name == "publish":
                 a.add_argument("--approve-sha256", required=True)
     sub.add_parser("recover").add_argument("--confirm-no-active-operations", action="store_true")
+    for name in ("recovery-inspect", "recovery-quarantine", "recovery-filesystem", "recovery-git", "recovery-github"):
+        a = sub.add_parser(name)
+        a.add_argument("--id", required=True)
+        if name == "recovery-quarantine":
+            a.add_argument("--owner", required=True)
+            a.add_argument("--fence", required=True, type=int)
+            a.add_argument("--confirmed-stopped", action="store_true")
+        if name == "recovery-filesystem":
+            a.add_argument("--relative", required=True)
+            a.add_argument("--expected-sha256", required=True)
+        if name in ("recovery-git", "recovery-github"):
+            a.add_argument("--expected-commit", required=True)
+        if name == "recovery-github":
+            a.add_argument("--github-repo", required=True)
+            a.add_argument("--branch", required=True)
+            a.add_argument("--base", choices=("main", "master"), required=True)
+            a.add_argument("--title", required=True)
+            a.add_argument("--body", required=True)
     return p
 
 
@@ -60,6 +79,30 @@ def execute(args: argparse.Namespace, store: WorkflowStore) -> dict:
             raise StateError("stop all other coordinators before recovery")
         return {"status": "reconciliation_required", "workflows": store.recover()}
     row = store.get(args.id)
+    if args.action == "recovery-inspect":
+        return {"status": "inspection_only", "workflow": row,
+                "operation_owner": store.operation_owner(args.id),
+                "events": store.events(args.id)}
+    if args.action == "recovery-quarantine":
+        # The flag is a human assertion, not proof of process termination.
+        # Never expose this operator-only action to an agent or web client.
+        updated = store.quarantine_abandoned_owner(
+            args.id, owner=args.owner, fence=args.fence,
+            confirmed_stopped=args.confirmed_stopped)
+        return {"status": "needs_reconciliation", "workflow": updated,
+                "warning": "External outcome remains unverified; no replay or state resolution."}
+    if args.action == "recovery-filesystem":
+        return filesystem_evidence(store, args.id, args.relative, args.expected_sha256)
+    if args.action == "recovery-git":
+        return git_evidence(store, args.id, args.expected_commit)
+    if args.action == "recovery-github":
+        import os
+        token = os.environ.get("GH_TOKEN")
+        if not token:
+            raise StateError("GH_TOKEN required for read-only GitHub evidence")
+        return github_evidence(store, args.id, github_repo=args.github_repo,
+                               branch=args.branch, expected_commit=args.expected_commit,
+                               base=args.base, title=args.title, body=args.body, token=token)
     if args.action == "status":
         return {"status": "ok", "workflow": row}
     if args.action == "events":
