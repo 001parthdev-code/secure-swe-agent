@@ -1,6 +1,7 @@
-"""Persistent, read-only JSON-lines Enforcer client."""
+"""Persistent JSON-lines Enforcer client; mutation requires explicit trusted opt-in."""
 import json
 import os
+import sys
 from pathlib import Path
 import queue
 import subprocess
@@ -12,7 +13,10 @@ class EnforcerError(RuntimeError):
 
 
 class EnforcerClient:
-    def __init__(self, executable: Path, workspace: Path, timeout: float = 10):
+    def __init__(self, executable: Path, workspace: Path, timeout: float = 10, *, trusted_exclusive: bool = False):
+        if trusted_exclusive and sys.platform != "linux":
+            raise EnforcerError("trusted-exclusive mode is Linux-only")
+        self.trusted_exclusive = trusted_exclusive
         self.executable = Path(executable).resolve(strict=True)
         self.workspace = Path(workspace).resolve(strict=True)
         self.timeout = timeout
@@ -26,6 +30,8 @@ class EnforcerClient:
         for key in ('ENFORCER_TRUSTED_EXCLUSIVE_WORKSPACE', 'ENFORCER_ENABLE_EXECUTION',
                     'ENFORCER_EXECUTION_UID', 'ENFORCER_EXECUTION_GID'):
             env.pop(key, None)
+        if self.trusted_exclusive:
+            env["ENFORCER_TRUSTED_EXCLUSIVE_WORKSPACE"] = "1"
         self.process = subprocess.Popen([str(self.executable)], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         text=True, encoding='utf-8', env=env, bufsize=1)
@@ -38,10 +44,10 @@ class EnforcerClient:
         threading.Thread(target=reader, daemon=True).start()
         return self
 
-    def read_file(self, path: str) -> dict:
+    def request(self, action: str, **fields) -> dict:
         if self.process is None or self.process.poll() is not None:
             raise EnforcerError('Enforcer not running')
-        request = json.dumps({'action': 'read_file', 'path': path}, ensure_ascii=False)
+        request = json.dumps({'action': action, **fields}, ensure_ascii=False)
         if len(request.encode('utf-8')) > 64 * 1024:
             raise EnforcerError('Request too large')
         try:
@@ -60,6 +66,18 @@ class EnforcerClient:
         if not isinstance(response, dict) or not isinstance(response.get('status'), str):
             raise EnforcerError('Malformed Enforcer response')
         return response
+
+    def read_file(self, path: str) -> dict:
+        return self.request('read_file', path=path)
+
+    def get_file_version(self, path: str) -> dict:
+        return self.request('get_file_version', path=path)
+
+    def modify_file_versioned(self, path: str, content: str, token: str) -> dict:
+        if not self.trusted_exclusive:
+            raise EnforcerError('mutation disabled for this client')
+        return self.request('modify_file_versioned', path=path, content=content,
+                            expected_version=token)
 
     def close(self):
         if self.process is not None:

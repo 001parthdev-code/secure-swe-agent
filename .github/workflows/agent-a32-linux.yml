@@ -1,0 +1,17 @@
+name: Agent A3.2 Linux supervised apply
+on:
+  push:
+  pull_request:
+jobs:
+  a32-apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Enforcer
+        working-directory: enforcer
+        run: cargo build --locked -p enforcer-cli
+      - name: Agent unit tests
+        run: python3 -m unittest discover -s agent/tests -p 'test_a32.py' -v
+      - name: Supervised E2 integration in disposable workspace
+        run: python3 agent/tests/test_a32_linux_integration.py enforcer/target/debug/enforcer-cli
