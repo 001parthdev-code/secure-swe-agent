@@ -1,7 +1,10 @@
-//! E2 transaction lifecycle validation.
-//!
-//! This module tracks legal transitions; it does NOT provide OS isolation,
-//! version verification, or an atomic filesystem commit by itself.
+#[cfg(target_os = "linux")]
+pub mod version;
+
+// E2 transaction lifecycle validation.
+//
+// This module tracks legal transitions; it does NOT provide OS isolation,
+// version verification, or an atomic filesystem commit by itself.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
