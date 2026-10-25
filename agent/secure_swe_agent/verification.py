@@ -1,8 +1,11 @@
+
 """A4 controlled-fixture verification. Not a sandbox for untrusted test code."""
+
 from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -10,30 +13,85 @@ class VerificationError(ValueError):
     pass
 
 
-def verify_calculator_fixture(workspace: Path, *, timeout: float = 10.0) -> dict:
-    """Execute only the trusted calculator fixture in a disposable workspace.
+def verify_calculator_fixture(
+    workspace: Path, *, timeout: float = 10.0
+) -> dict:
+    """Verify a trusted calculator fixture in a fresh test directory.
 
-    This runner is operator/CI owned. Never call it with a repository supplied
-    by an untrusted agent, and never treat it as an Enforcer execution capability.
+    This runner is operator/CI owned. Never execute untrusted repository
+    code with this runner or treat it as an Enforcer execution capability.
     """
     workspace = Path(workspace).resolve(strict=True)
     calculator = workspace / "calculator"
+
     if calculator.is_symlink() or not calculator.is_dir():
-        raise VerificationError("calculator fixture directory missing or linked")
+        raise VerificationError(
+            "calculator fixture directory missing or linked"
+        )
+
     for name in ("calculator.py", "test_calculator.py"):
         path = calculator / name
+
         if path.is_symlink() or not path.is_file():
-            raise VerificationError(f"fixture file missing or linked: {name}")
+            raise VerificationError(
+                f"fixture file missing or linked: {name}"
+            )
+
     if not 0 < timeout <= 30:
         raise VerificationError("invalid timeout")
-    command = [sys.executable, "-m", "unittest", "-v", "test_calculator"]
-    try:
-        result = subprocess.run(command, cwd=calculator, stdin=subprocess.DEVNULL,
-                                capture_output=True, timeout=timeout, check=False)
-    except subprocess.TimeoutExpired:
-        return {"status": "timeout", "verified": False, "exit_code": None,
-                "output": "test deadline exceeded"}
-    output = (result.stdout + result.stderr)[:8192].decode("utf-8", errors="replace")
-    return {"status": "passed" if result.returncode == 0 else "failed",
-            "verified": result.returncode == 0, "exit_code": result.returncode,
-            "output": output}
+
+    # Read the current source, not any previously compiled bytecode.
+    source = (calculator / "calculator.py").read_bytes()
+    tests = (calculator / "test_calculator.py").read_bytes()
+
+    # Each verification gets a fresh directory and no stale __pycache__.
+    with tempfile.TemporaryDirectory(
+        prefix="secure-swe-verification-"
+    ) as temp_dir:
+        fixture = Path(temp_dir)
+
+        (fixture / "calculator.py").write_bytes(source)
+        (fixture / "test_calculator.py").write_bytes(tests)
+
+        command = [
+    sys.executable,
+    "-B",
+    "-c",
+    (
+        "import calculator; "
+        "print('CALCULATOR_PATH:', calculator.__file__); "
+        "print('CALCULATOR_RESULT:', calculator.subtract(8, 3)); "
+        "import unittest; "
+        "suite = unittest.defaultTestLoader.loadTestsFromName('test_calculator'); "
+        "result = unittest.TextTestRunner(verbosity=2).run(suite); "
+        "raise SystemExit(0 if result.wasSuccessful() else 1)"
+    ),
+]
+
+        try:
+            result = subprocess.run(
+                command,
+                cwd=fixture,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "status": "timeout",
+                "verified": False,
+                "exit_code": None,
+                "output": "test deadline exceeded",
+            }
+
+    output = (result.stdout + result.stderr)[:8192].decode(
+        "utf-8", errors="replace"
+    )
+
+    return {
+        "status": "passed" if result.returncode == 0 else "failed",
+        "verified": result.returncode == 0,
+        "exit_code": result.returncode,
+        "output": output,
+    }
