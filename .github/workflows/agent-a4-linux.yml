@@ -1,0 +1,17 @@
+name: Agent A4 trusted fixture verification
+on:
+  push:
+  pull_request:
+jobs:
+  a4-verification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Enforcer
+        working-directory: enforcer
+        run: cargo build --locked -p enforcer-cli
+      - name: Python tests
+        run: python3 -m unittest discover -s agent/tests -p 'test_a4.py' -v
+      - name: A3.2 apply and A4 verify disposable fixture
+        run: python3 agent/tests/test_a4_linux_integration.py enforcer/target/debug/enforcer-cli
