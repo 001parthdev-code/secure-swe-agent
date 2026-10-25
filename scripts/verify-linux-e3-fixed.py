@@ -44,7 +44,14 @@ def main():
         env["ENFORCER_EXEC_GID"] = str(nobody.pw_gid)
         with launch(env) as proc:
             assert request(proc, "/bin/sh")["status"] == "policy_denied"
-            assert request(proc, "true") == {"status": "success", "output": "exit_code=0"}
+            actual = request(proc, "true")
+            expected = {"status": "success", "output": "exit_code=0"}
+
+            assert actual == expected, (
+                f"E3 true command failed:\n"
+                f"Expected: {expected!r}\n"
+                f"Actual:   {actual!r}"
+            )
             assert request(proc, "false") == {"status": "success", "output": "exit_code=1"}
         print("PASS: E3 fixed probes, explicit opt-in, Linux credential drop and allowlist")
         print("LIMITATION: no mount, network or syscall sandbox attestation")
