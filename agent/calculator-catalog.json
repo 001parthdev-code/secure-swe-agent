@@ -1,0 +1,7 @@
+{
+  "files": [
+    "calculator/calculator.py",
+    "calculator/main.py",
+    "calculator/test_calculator.py"
+  ]
+}

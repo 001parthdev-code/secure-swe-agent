@@ -6,6 +6,7 @@ from secure_swe_agent.agent import Agent
 from secure_swe_agent.catalog import load_catalog, valid_path
 from secure_swe_agent.enforcer import EnforcerClient
 from secure_swe_agent.ollama import Ollama
+from secure_swe_agent.proposals import propose_changes
 
 
 def main():
@@ -19,6 +20,7 @@ def main():
                         help='Operator-curated JSON manifest: {"files":["src/main.rs"]}')
     parser.add_argument('--model', default='qwen3.5:4b')
     parser.add_argument('--steps', type=int, default=10)
+    parser.add_argument('--propose', action='store_true', help='Produce reviewable code-change proposals; never apply')
     args = parser.parse_args()
     files = list(args.files)
     if args.manifest:
@@ -26,7 +28,10 @@ def main():
     if not files or len(set(files)) > 200 or any(not valid_path(p) for p in files):
         parser.error('provide 1-200 valid approved relative paths via --file or --manifest')
     with EnforcerClient(args.enforcer, args.workspace) as enforcer:
-        outcome = Agent(Ollama(model=args.model), enforcer, sorted(set(files)), args.steps).run(args.task)
+        if args.propose:
+            outcome = propose_changes(Ollama(model=args.model), enforcer, args.task, sorted(set(files)))
+        else:
+            outcome = Agent(Ollama(model=args.model), enforcer, sorted(set(files)), args.steps).run(args.task)
     print(json.dumps(outcome, indent=2, ensure_ascii=False))
 
 
