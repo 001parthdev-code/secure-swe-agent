@@ -30,7 +30,7 @@ def main():
         def launch(settings):
             return subprocess.Popen([executable], env=settings, text=True,
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, bufsize=1)
+                                    stderr=None, bufsize=1)
         with launch(env) as proc:
             assert request(proc, "true")["status"] == "policy_denied"
         # The privileged supervisor is used only inside this disposable CI test.
