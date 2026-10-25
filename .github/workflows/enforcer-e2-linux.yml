@@ -1,0 +1,14 @@
+name: Enforcer E2 Linux integration
+on:
+  push:
+  pull_request:
+jobs:
+  linux-e2-versioned:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Linux Enforcer CLI
+        run: cargo build --locked -p enforcer-cli
+      - name: Exercise versioned modification in a disposable workspace
+        run: python3 scripts/verify-linux-e2-versioned.py target/debug/enforcer-cli
