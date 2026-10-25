@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 enforcer-protocol = { path = "../enforcer-protocol" }
 enforcer-fs = { path = "../enforcer-fs" }
-enforcer-transaction = { path = "../enforcer-transaction" }
+enforcer-execution = { path = "../enforcer-execution" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 enforcer-transaction = { path = "../enforcer-transaction" }

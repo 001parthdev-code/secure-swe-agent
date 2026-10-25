@@ -17,6 +17,8 @@ pub struct Policy {
     versions: Mutex<HashMap<String, (String, enforcer_transaction::version::Snapshot)>>,
     #[cfg(target_os = "linux")]
     trusted_exclusive: bool,
+    #[cfg(target_os = "linux")]
+    execution_identity: Option<(u32, u32)>,
 }
 
 impl Policy {
@@ -46,6 +48,8 @@ impl Policy {
             #[cfg(target_os = "linux")]
             trusted_exclusive: std::env::var("ENFORCER_TRUSTED_EXCLUSIVE_WORKSPACE")
                 .is_ok_and(|value| value == "1"),
+            #[cfg(target_os = "linux")]
+            execution_identity: execution_identity_from_environment(),
         })
     }
 
@@ -60,11 +64,50 @@ impl Policy {
                 content,
                 expected_version,
             } => self.modify_file_versioned(&path, &content, &expected_version),
-            ToolRequest::WriteFile { .. } | ToolRequest::RunCommand { .. } => {
-                ToolResult::PolicyDenied {
-                    reason: "capability not enabled in E1".into(),
+            ToolRequest::RunCommand { command } => self.run_command(&command),
+            ToolRequest::WriteFile { .. } => ToolResult::PolicyDenied {
+                reason: "capability not enabled in E1".into(),
+            },
+        }
+    }
+
+    // E3: deliberately limited fixed probes. This is not a filesystem sandbox.
+    #[cfg(target_os = "linux")]
+    fn run_command(&self, command: &str) -> ToolResult {
+        // Do not allow an agent to configure its own execution identity.
+        let Some((uid, gid)) = self.execution_identity else {
+            return ToolResult::PolicyDenied {
+                reason: "restricted execution not configured".into(),
+            };
+        };
+        // Allowlist before attempting any privileged operation.
+        if command != "true" && command != "false" {
+            return ToolResult::PolicyDenied {
+                reason: "command not allowlisted".into(),
+            };
+        }
+        match enforcer_execution::run_fixed_probe(command, uid, gid) {
+            Ok(enforcer_execution::ExecutionOutcome::Completed { exit_code }) => {
+                ToolResult::Success {
+                    output: format!("exit_code={exit_code}"),
                 }
             }
+            Ok(enforcer_execution::ExecutionOutcome::TimedOut) => ToolResult::ResourceLimit {
+                reason: "command exceeded 3 second limit".into(),
+            },
+            Err(enforcer_execution::ExecutionError::Denied(reason)) => ToolResult::PolicyDenied {
+                reason: reason.into(),
+            },
+            Err(enforcer_execution::ExecutionError::Os(_)) => ToolResult::ExecutionFailure {
+                error: "restricted process launch failed".into(),
+            },
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn run_command(&self, _command: &str) -> ToolResult {
+        ToolResult::PolicyDenied {
+            reason: "restricted execution is Linux-only".into(),
         }
     }
 
@@ -266,6 +309,31 @@ impl Policy {
             Err(e) => file_error(e),
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
+fn execution_identity_from_environment() -> Option<(u32, u32)> {
+    // Explicit opt-in by trusted operator. Never accept these values in JSON.
+    if std::env::var("ENFORCER_ENABLE_FIXED_EXECUTION")
+        .ok()
+        .as_deref()
+        != Some("1")
+    {
+        return None;
+    }
+    let uid = std::env::var("ENFORCER_EXEC_UID")
+        .ok()?
+        .parse::<u32>()
+        .ok()?;
+    let gid = std::env::var("ENFORCER_EXEC_GID")
+        .ok()?
+        .parse::<u32>()
+        .ok()?;
+    if uid == 0 || gid == 0 {
+        return None;
+    }
+    Some((uid, gid))
 }
 
 fn denied() -> ToolResult {

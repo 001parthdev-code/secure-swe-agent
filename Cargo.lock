@@ -19,6 +19,7 @@ dependencies = [
 name = "enforcer-core"
 version = "0.1.0"
 dependencies = [
+ "enforcer-execution",
  "enforcer-fs",
  "enforcer-protocol",
  "enforcer-transaction",
