@@ -25,7 +25,13 @@ _SHA = re.compile(r"[0-9a-f]{64}\Z")
 def _origin(repo: Path, expected: str) -> str:
     if not _SLUG.fullmatch(expected) or ".." in expected:
         raise GitBrokerError("invalid GitHub repository slug")
-    url = _git(repo, "remote", "get-url", "origin").strip()
+    url = _git(
+    repo,
+    "config",
+    "--local",
+    "--get",
+    "remote.origin.url",
+).strip()
     parsed = urlparse(url)
     if (parsed.scheme != "https" or parsed.hostname != "github.com"
             or parsed.username is not None or parsed.password is not None
