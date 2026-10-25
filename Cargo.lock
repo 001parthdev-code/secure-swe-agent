@@ -46,6 +46,9 @@ dependencies = [
 [[package]]
 name = "enforcer-transaction"
 version = "0.1.0"
+dependencies = [
+ "enforcer-fs",
+]
 
 [[package]]
 name = "itoa"
