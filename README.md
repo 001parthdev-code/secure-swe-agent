@@ -1,4 +1,17 @@
-# Secure SWE Agent
+# Secure SWE 
+
+[![Rust](https://img.shields.io/badge/Rust-Systems_Engineering-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Linux](https://img.shields.io/badge/Linux-Supported-FCC624?logo=linux&logoColor=black)](https://www.kernel.org/)
+[![Version](https://img.shields.io/badge/version-v0.1.0-blue)](https://github.com/001parthdev-code/secure-swe-agent/releases)
+![Status](https://img.shields.io/badge/status-functional_prototype-orange)
+![Windows](https://img.shields.io/badge/Windows-isolation_pending-lightgrey)
+
+[![Rust CI](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-ci.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-ci.yml)
+[![E2 Linux](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e2-linux.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e2-linux.yml)
+[![E3 Linux](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e3-linux.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e3-linux.yml)
+[![E4 Audit](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e4-audit.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e4-audit.yml)
+[![Linux Integration](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-linux-v01-integration.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-linux-v01-integration.yml)
+
 
 **An AI software-engineering agent project with a security-first Rust enforcement foundation.**
 
