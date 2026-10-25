@@ -54,3 +54,37 @@ def git_evidence(store: WorkflowStore, workflow_id: str, expected_commit: str) -
     observed = result.stdout.strip()
     return {"kind": "git", "outcome": "observed", "matches": observed == expected_commit,
             "actual_commit": observed}
+
+
+def github_evidence(store: WorkflowStore, workflow_id: str, *, github_repo: str,
+                    branch: str, expected_commit: str, base: str,
+                    title: str, body: str, token: str) -> dict:
+    """Read-only remote evidence; never resolves or replays a publication.
+
+    Uses the existing GitHub broker's validated origin, remote-head and PR
+    inspection. A missing PR is not proof that creation did not occur.
+    """
+    import re
+    from .github_broker import _origin, _remote_head, _existing_pr
+    row = store.get(workflow_id)
+    if row["state"] != "needs_reconciliation":
+        raise StateError("workflow is not awaiting reconciliation")
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", expected_commit):
+        raise StateError("invalid expected commit")
+    if not re.fullmatch(r"agent/task-[A-Za-z0-9_.-]+", branch):
+        raise StateError("invalid task branch")
+    if base not in ("main", "master") or not token:
+        raise StateError("invalid remote evidence parameters")
+    repo = Path(row["repo"]).resolve(strict=True)
+    _origin(repo, github_repo)
+    observed = _remote_head(repo, branch)
+    if observed is None:
+        return {"kind": "github", "outcome": "branch_missing", "matches": False,
+                "pr": "not_checked"}
+    if observed != expected_commit:
+        return {"kind": "github", "outcome": "branch_conflict", "matches": False,
+                "observed_commit": observed, "pr": "not_checked"}
+    pr = _existing_pr(github_repo, branch, base, expected_commit, title, body, token)
+    return {"kind": "github", "outcome": "matching_pr" if pr else "pr_not_observed",
+            "matches": bool(pr), "observed_commit": observed,
+            "pr": pr["url"] if pr else None}

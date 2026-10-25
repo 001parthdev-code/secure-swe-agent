@@ -221,6 +221,42 @@ class WorkflowStore:
         ).fetchone()
         return dict(row) if row is not None else None
 
+    def quarantine_abandoned_owner(self, workflow_id: str, *, owner: str,
+                                   fence: int, confirmed_stopped: bool) -> dict:
+        """Operator-only: quarantine an abandoned operation, never resume it.
+
+        The caller must independently establish that the previous coordinator
+        and its descendants cannot still perform side effects. TTL expiry is
+        explicitly insufficient. This method cannot verify that assertion.
+        """
+        if confirmed_stopped is not True:
+            raise StateError("independent termination confirmation required")
+        self._begin()
+        try:
+            row = self.db.execute("SELECT * FROM workflows WHERE id=?", (workflow_id,)).fetchone()
+            if row is None:
+                raise StateError("unknown workflow")
+            lock = self.db.execute("SELECT owner, fencing FROM operation_owners WHERE workflow_id=?",
+                                   (workflow_id,)).fetchone()
+            if lock is None or lock["owner"] != owner or lock["fencing"] != fence:
+                raise StateError("operation ownership mismatch")
+            if row["state"] not in _IN_FLIGHT and row["state"] != "needs_reconciliation":
+                raise StateError("cannot quarantine owner outside uncertain operation")
+            self.db.execute("DELETE FROM operation_owners WHERE workflow_id=? AND owner=? AND fencing=?",
+                            (workflow_id, owner, fence))
+            if row["state"] in _IN_FLIGHT:
+                revision = row["revision"] + 1
+                now = int(time.time())
+                self.db.execute("UPDATE workflows SET state='needs_reconciliation', revision=?, updated_at=? WHERE id=?",
+                                (revision, now, workflow_id))
+                self.db.execute("INSERT INTO events VALUES (?,?,?,?,?,?)",
+                                (workflow_id, revision, "needs_reconciliation", "owner_quarantined", "{}", now))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self._rollback()
+            raise
+        return self.get(workflow_id)
+
     def recover(self) -> list[dict]:
         """Mark interrupted side effects uncertain. Never replay them automatically."""
         self._begin()
