@@ -104,3 +104,6 @@ benchmarks/results/
 
 # Preserve source, tests, documentation,
 # CI workflows, and architecture records
+
+# Generated Windows isolation traces
+/isolation-trace-output/
