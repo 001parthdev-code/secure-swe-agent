@@ -268,21 +268,6 @@ impl Policy {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn read_version_bytes(file: &mut File) -> io::Result<Vec<u8>> {
-    use std::io::{Seek, SeekFrom};
-    file.seek(SeekFrom::Start(0))?;
-    let mut bytes = Vec::new();
-    file.take(MAX_READ_BYTES + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_READ_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "file exceeds version limit",
-        ));
-    }
-    Ok(bytes)
-}
-
 fn denied() -> ToolResult {
     ToolResult::PolicyDenied {
         reason: "path is not an allowed workspace-relative path".into(),
