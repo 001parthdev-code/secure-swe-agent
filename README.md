@@ -1,10 +1,12 @@
-# Secure SWE 
+# Secure SWE Agent
 
-[![Rust](https://img.shields.io/badge/Rust-Systems_Engineering-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Linux](https://img.shields.io/badge/Linux-Supported-FCC624?logo=linux&logoColor=black)](https://www.kernel.org/)
-[![Version](https://img.shields.io/badge/version-v0.1.0-blue)](https://github.com/001parthdev-code/secure-swe-agent/releases)
-![Status](https://img.shields.io/badge/status-functional_prototype-orange)
-![Windows](https://img.shields.io/badge/Windows-isolation_pending-lightgrey)
+**A supervised, local-model software engineering agent with a Rust security enforcement foundation.**
+
+[![Rust](https://img.shields.io/badge/Rust-Enforcer-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Python](https://img.shields.io/badge/Python-Agent-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Linux](https://img.shields.io/badge/Linux-Integrated-FCC624?logo=linux&logoColor=black)](https://www.kernel.org/)
+![Status](https://img.shields.io/badge/status-supervised_prototype-orange)
+![License](https://img.shields.io/badge/license-proprietary-red)
 
 [![Rust CI](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-ci.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-ci.yml)
 [![E2 Linux](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e2-linux.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e2-linux.yml)
@@ -12,146 +14,128 @@
 [![E4 Audit](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e4-audit.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e4-audit.yml)
 [![Linux Integration](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-linux-v01-integration.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-linux-v01-integration.yml)
 
+> **Project status (October 2026):** The supervised A1–A7 calculator-repair workflow has been demonstrated end to end, including a real GitHub pull request. Agent-side stabilization through R3.4.4 has been reported green. The Rust Enforcer is a **frozen functional prototype**, not a production-secure sandbox. The hosted UI and authenticated backend API are planned, not deployed.
 
-**An AI software-engineering agent project with a security-first Rust enforcement foundation.**
+## What it does
 
-> **Current milestone:** v0.1.0 — Rust Enforcer Linux functional prototype. The autonomous agent is planned, not implemented. Not production-secure.
+Secure SWE Agent uses a locally hosted Qwen model to inspect an **operator-approved file catalog**, propose source changes, and coordinate a supervised coding workflow. Human approval is required before protected modification, Git commit, and GitHub publication. The Rust Enforcer mediates authorized file operations; separate trusted Python components handle controlled verification and Git/GitHub operations.
+
+The current prototype is **not** an unattended coding service for arbitrary untrusted repositories.
+
+## Demonstrated workflow
+
+1. A user requests a calculator bug fix.
+2. Qwen (`qwen3.5:4b` via Ollama) examines approved source and proposes a diff.
+3. The operator reviews and approves the exact proposal fingerprint.
+4. On Linux, the Rust Enforcer applies the approved version-checked modification in a trusted disposable workspace.
+5. The operator-owned calculator regression suite passes **6/6 tests**.
+6. The Git broker creates an approved commit on `agent/task-fix-subtraction`.
+7. The GitHub broker pushes the task branch and creates a pull request after separate approval.
+
+**Verified demonstration:** [Calculator subtraction fix — PR #1](https://github.com/001parthdev-code/secure-swe-agent-demo/pull/1) · commit `e782201c2d0b74772e1a741d8b3f3120b3228ba0`.
+
+This proves the controlled demonstration path, **not** general-purpose autonomous repair reliability.
+
+## Architecture
+
+```text
+Human operator
+      |
+      v
+Python agent + supervised workflow (agent/)
+      |-- Qwen 3.5 4B / Ollama: analysis and proposals
+      |-- SQLite journal: task state, revisions and recovery evidence
+      |-- Human approval: proposed edit / commit / publication
+      |-- Enforcer client ---> Rust Enforcer (enforcer/; frozen)
+      |                         |-- E1 filesystem operations
+      |                         |-- E2 Linux versioned modification
+      |                         |-- E3 fixed-command probes
+      |                         `-- E4 structured audit events
+      |-- Trusted calculator verifier (not a sandbox)
+      |-- Trusted Git broker
+      `-- GitHub publishing broker ---> approved task branch / PR
+```
+
+The model does **not** receive GitHub credentials or authorization authority. A future frontend must call a backend that validates server-side approval evidence; it must not invoke privileged tools directly.
+
+See [current architecture and trust boundaries](docs/ARCHITECTURE-CURRENT.md).
 
 ## Repository layout
 
-- `enforcer/` — self-contained Rust Cargo workspace, tests, engineering logs, and verification scripts.
-- `agent/` — reserved for the future AI agent (not implemented).
-- `.github/workflows/` — CI executes Cargo and integration tests from `enforcer/`.
-- `docs/` — system-level architecture and release overview.
+| Path | Purpose |
+| --- | --- |
+| [`agent/`](agent/) | Qwen integration, proposals, approval tools, A7 CLI, durable journal and recovery modules |
+| [`enforcer/`](enforcer/) | Independently buildable eight-crate Rust Enforcer workspace; **frozen** |
+| [`docs/`](docs/) | Architecture, project status, operations, engineering records |
+| [`.github/workflows/`](.github/workflows/) | Automated verification and Linux integration jobs |
+| `workspace/` | Local controlled example/benchmark fixtures |
 
-Run Enforcer commands from `enforcer/` (for example, `cd enforcer`), or use `cargo --manifest-path enforcer/Cargo.toml ...` from the repository root.
+The Enforcer and agent are **one project in one repository**, not separate products.
 
-## Overview
+## Developer setup and checks
 
-Secure SWE Agent is one repository and one evolving product. Its intended AI agent will plan software-engineering tasks and request operations through the Rust Enforcer, which mediates access to files and controlled execution. **The agent layer is not implemented in v0.1.0.** The currently working deliverable is the Enforcer subsystem, not a separate product or repository.
+**Prerequisites:** Python, Git, Rust/Cargo, and Ollama with `qwen3.5:4b` for model-backed tasks. Linux is required for the demonstrated E2 versioned-apply path. The agent's core Python tests use the standard library; follow the individual scripts' help output for workflow-specific arguments.
 
-The v0.1.0 milestone demonstrates the Enforcer E1–E4 working together in a controlled Linux integration test. It is intended for development, learning, and security experimentation—not execution of arbitrary hostile code.
+From the repository root:
 
-## Project roadmap and architecture
-
-**Implemented now:** Rust Enforcer, including E1–E4 functional prototype. **Planned in this same repository:** agent planning/reasoning, code understanding, tool orchestration, feedback and verification. Production isolation hardening is a separate release gate.
-
-
-```text
- Future Secure SWE Agent / current test client
-             |
-        JSON Lines requests
-             v
-      +--------------------+
-      | enforcer-cli       |---- JSON Lines audit ---> stderr
-      | framing + dispatch |
-      +---------+----------+
-                |
-      +---------v----------+
-      | enforcer-core      |
-      | policy + routing   |
-      +---+----------+-----+
-          |          |
-    +-----v-----+  +-v------------------+
-    | enforcer-fs|  | enforcer-execution |
-    | safe file  |  | fixed Linux probes |
-    | operations |  +--------------------+
-    +-----+------+ 
-          |
-    +-----v----------------+
-    | enforcer-transaction |
-    | Linux version/commit |
-    +----------------------+
-
- enforcer-protocol: shared request/response types
- enforcer-isolation: preflight and experimental OS isolation checks
- enforcer-audit: structured event encoding
+```bash
+python -m unittest discover -s agent/tests -v
+python -m compileall -q agent
 ```
 
-Crates are libraries unless explicitly built as executables. The Enforcer CLI and the restricted Linux probe processes are separate processes. See [architecture and status](docs/ARCHITECTURE.md).
-
-## Current Enforcer capabilities (v0.1.0)
-
-| Capability | Linux v0.1 | Windows |
-| --- | --- | --- |
-| Workspace-relative read/create/basic modification | Implemented and tested | Existing workspace tests |
-| `get_file_version` | Process-local token | Denied |
-| `modify_file_versioned` | Controlled prototype; operator-gated | Denied |
-| `run_command` | `true` / `false` only; operator-gated | Denied |
-| JSONL audit stream | stderr | stderr |
-| General-purpose agent command sandbox | **Not supported** | **Not supported** |
-
-**Security boundary:** `ENFORCER_TRUSTED_EXCLUSIVE_WORKSPACE=1` is an operator assertion, not proof of exclusive mutation authority. E3's fixed probes are not a general-purpose isolated execution environment. See [SECURITY.md](SECURITY.md).
-
-## Quick start
-
-Requirements: Rust toolchain supporting edition 2024 and Cargo. Linux is required for the complete E2/E3 controlled flow.
+Build and verify the **unchanged** Enforcer:
 
 ```bash
 cd enforcer
 cargo build --locked -p enforcer-cli
-mkdir -p /tmp/enforcer-demo
-printf 'hello\n' > /tmp/enforcer-demo/example.txt
-export ENFORCER_WORKSPACE=/tmp/enforcer-demo
-printf '%s\n' '{"action":"read_file","path":"example.txt"}' | cargo run --quiet --locked -p enforcer-cli
-```
-
-Expected response (the audit event is separately written to stderr):
-
-```json
-{"status":"success","output":"hello\n"}
-```
-
-The CLI reads **one JSON object per line** on stdin and writes **one JSON result per line** on stdout. Keep the same CLI process alive when using version tokens, because tokens are process-local.
-
-### Request examples
-
-```json
-{"action":"read_file","path":"example.txt"}
-{"action":"create_file","path":"new.txt","content":"hello"}
-{"action":"get_file_version","path":"example.txt"}
-{"action":"modify_file_versioned","path":"example.txt","content":"updated","expected_version":"ephemeral-v1:<token>"}
-{"action":"run_command","command":"true"}
-```
-
-The last two operations are **disabled by default**. Only use the controlled integration harness to exercise their prototype gates; do not set the trusted-exclusive flag on a workspace accessible to untrusted writers. The fixed-command execution test requires a privileged supervisor solely to drop child credentials.
-
-## Build and verification of the Enforcer milestone
-
-```bash
 cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-Linux-only integrated verification is executed by the [Linux V0.1 GitHub Actions workflow](.github/workflows/enforcer-linux-v01-integration.yml) using a disposable workspace. The script is at [`enforcer/scripts/verify-linux-v01-integrated.py`](enforcer/scripts/verify-linux-v01-integrated.py); it requires a controlled privileged CI environment and is **not** a production isolation attestation.
+For a basic local, read-only agent interaction, see [`agent/README.md`](agent/README.md) and `python agent/main.py --help`. For supervised A7 stages, use `python agent/a7_demo.py --help` (and each subcommand's `--help`). Durable operator tooling is available through `agent/a7_durable.py` but is **not** a fully automated crash-recovery service.
 
-## Repository map (current implementation)
+**Do not run the complete modification/publishing demo against your primary repository.** Use an approved disposable Linux workspace and a separate GitHub demonstration repository. See [operations and demo prerequisites](docs/OPERATIONS-AND-ROADMAP.md).
 
-| Location | Responsibility |
-| --- | --- |
-| `enforcer/crates/enforcer-cli` | JSONL framing, dispatch and audit emission |
-| `enforcer/crates/enforcer-protocol` | Request/result contracts |
-| `enforcer/crates/enforcer-core` | Policy, authorization and operation routing |
-| `enforcer/crates/enforcer-fs` | OS-specific filesystem access |
-| `enforcer/crates/enforcer-transaction` | Linux snapshots and atomic replacement prototype |
-| `enforcer/crates/enforcer-execution` | Linux fixed-command restricted child |
-| `enforcer/crates/enforcer-isolation` | OS preflight and experimental isolation tests |
-| `enforcer/crates/enforcer-audit` | Structured audit events |
-| `docs/` | Architecture decisions, experiments, engineering records |
-| `enforcer/scripts/` | Integration and security test harnesses |
+## Current capabilities and limits
 
-## Release scope and next steps
+| Area | Implemented / demonstrated | Important limitation |
+| --- | --- | --- |
+| A1–A2 | Local model integration, approved catalog selection, Enforcer-backed reads | Not unrestricted repository discovery |
+| A3 | Diff proposals and supervised E2 application | Versioned apply demonstrated on Linux only |
+| A4 | Trusted calculator regression verification | Not safe for arbitrary untrusted test code |
+| A5–A6 | Approved local Git commits, task-branch push and GitHub PR | Requires operator-controlled repository and credentials |
+| A7 | Complete supervised calculator-to-PR demonstration | CLI checkpoints; no user-facing UI yet |
+| R1–R2 | Verification and Git publishing stabilization | Not a general security certification |
+| R3 | SQLite journal, ownership controls, recovery evidence and operator tooling | Uncertain external effects still require trusted reconciliation |
+| Enforcer E1–E4 | Functional Linux integration | Not production-grade hostile-code isolation |
 
-**v0.1.0:** functional Linux prototype, with E1–E4 integrated CI evidence. **Not production approved.** Next: isolate general-purpose execution, enforce workspace mutation authority, add process-tree/resource controls, improve durability and audit storage, and conduct adversarial validation. Windows sandbox research remains frozen.
+**Security limitations:** E2's `ENFORCER_TRUSTED_EXCLUSIVE_WORKSPACE=1` is an operator assertion, not independently verified exclusive authority. E3 supports only fixed probes, not arbitrary sandboxed test execution. SQLite transitions cannot atomically commit filesystem, Git or GitHub side effects. No public deployment is approved yet.
 
-Read [release notes](docs/releases/v0.1.0.md), [documentation index](docs/README.md), and [security limitations](SECURITY.md) before extending or deploying the system.
+The **entire `enforcer/` tree is frozen** until production-security hardening is explicitly authorized. New agent and UI work must use its existing contract without bypassing its restrictions.
 
-## Unified project roadmap
+## Roadmap
 
-1. **v0.1.0 — Enforcer functional prototype (current):** integrated Linux E1–E4, with known security limitations.
-2. **Enforcer security hardening:** enforce isolation and exclusive mutation authority, expand adversarial tests, improve process-tree controls and audit durability.
-3. **Agent implementation in this repository:** add planning, code understanding, tool selection and verification components.
-4. **End-to-end Secure SWE Agent:** connect the agent to the Enforcer through an explicit trust boundary and verify realistic software-engineering workflows.
+- **R4:** Agent-side security review and deployment threat model.
+- **R5:** Adversarial tests, Linux integration and failure-injection evidence.
+- **R6:** Authenticated, durable backend API suitable for a UI.
+- **R7:** Final documentation, reproducible deployment and release gates.
+- **UI (planned):** Potential Hugging Face Spaces frontend with a separately controlled Linux backend. This is a deployment proposal, not an existing hosted service.
+- **Later, separately authorized:** Production-grade Enforcer hardening and broader execution isolation.
 
-The Enforcer remains modular and reusable, but it is **not being spun out into a separate repository or treated as the final product**.
+## Documentation
+
+- [Verified project status](docs/PROJECT-STATUS.md)
+- [Current architecture](docs/ARCHITECTURE-CURRENT.md)
+- [Operations and roadmap](docs/OPERATIONS-AND-ROADMAP.md)
+- [Security considerations](SECURITY.md)
+- [Enforcer subsystem](enforcer/README.md)
+- [Engineering records](docs/README.md)
+
+## License and commercial use
+
+**Proprietary / all rights reserved.** Do not assume the source is licensed for redistribution, derivative works or commercial use. Refer to the repository's applicable license and ownership notices; obtain written permission from the rights holder for uses requiring authorization.
+
+---
+
+*This README describes verified prototype functionality and documented engineering status. It does not claim production-security certification.*
