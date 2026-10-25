@@ -1,6 +1,12 @@
+#[cfg(target_os = "linux")]
+use std::collections::HashMap;
 use std::fs::{self, File};
+#[cfg(target_os = "linux")]
+use std::io::Read as _;
 use std::io::{self, Read};
 use std::path::{Component, Path};
+#[cfg(target_os = "linux")]
+use std::sync::Mutex;
 
 use enforcer_protocol::{ToolRequest, ToolResult};
 
@@ -9,6 +15,10 @@ pub const MAX_WRITE_BYTES: usize = 1024 * 1024;
 
 pub struct Policy {
     workspace: File,
+    #[cfg(target_os = "linux")]
+    versions: Mutex<HashMap<String, (String, enforcer_transaction::version::Snapshot)>>,
+    #[cfg(target_os = "linux")]
+    trusted_exclusive: bool,
 }
 
 impl Policy {
@@ -31,7 +41,14 @@ impl Policy {
         };
         #[cfg(not(windows))]
         let workspace = File::open(&root)?;
-        Ok(Self { workspace })
+        Ok(Self {
+            workspace,
+            #[cfg(target_os = "linux")]
+            versions: Mutex::new(HashMap::new()),
+            #[cfg(target_os = "linux")]
+            trusted_exclusive: std::env::var("ENFORCER_TRUSTED_EXCLUSIVE_WORKSPACE")
+                .is_ok_and(|value| value == "1"),
+        })
     }
 
     pub fn evaluate(&self, request: ToolRequest) -> ToolResult {
@@ -40,9 +57,11 @@ impl Policy {
             ToolRequest::GetFileVersion { path } => self.get_file_version(&path),
             ToolRequest::CreateFile { path, content } => self.write_file(&path, &content, false),
             ToolRequest::ModifyFile { path, content } => self.write_file(&path, &content, true),
-            ToolRequest::ModifyFileVersioned { .. } => ToolResult::PolicyDenied {
-                reason: "versioned modifications unavailable until workspace isolation and atomic commit are verified".into(),
-            },
+            ToolRequest::ModifyFileVersioned {
+                path,
+                content,
+                expected_version,
+            } => self.modify_file_versioned(&path, &content, &expected_version),
             ToolRequest::WriteFile { .. } | ToolRequest::RunCommand { .. } => {
                 ToolResult::PolicyDenied {
                     reason: "capability not enabled in E1".into(),
@@ -51,60 +70,46 @@ impl Policy {
         }
     }
 
-    // Read-only integration: returns an informational snapshot fingerprint.
-    // This is NOT an authorization token or a safe compare-and-swap precondition.
-    // The mutation API remains disabled until exclusive authority is enforced.
+    // Tokens are scoped to this CLI process and exact workspace-relative path.
+    // They are not persistent identifiers or proof of isolation.
     #[cfg(target_os = "linux")]
     fn get_file_version(&self, path: &str) -> ToolResult {
         let relative = Path::new(path);
-        if path.is_empty()
-            || relative.is_absolute()
-            || relative
-                .components()
-                .any(|c| !matches!(c, Component::Normal(_)))
-        {
+        if !valid_relative(path) {
             return denied();
         }
         let mut file = match enforcer_fs::open_relative(&self.workspace, relative) {
-            Ok(file) => file,
-            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return denied(),
+            Ok(f) => f,
             Err(e) => return file_error(e),
         };
-        let metadata = match file.metadata() {
-            Ok(m) => m,
+        let snap = match enforcer_transaction::version::snapshot(&mut file) {
+            Ok(s) => s,
             Err(e) => return file_error(e),
         };
-        if !metadata.is_file() {
-            return denied();
-        }
-        if metadata.len() > MAX_READ_BYTES {
-            return ToolResult::ResourceLimit {
-                reason: "file exceeds 1 MiB limit".into(),
-            };
-        }
-        // Read twice and require consistent bytes. This remains observational,
-        // not a security proof of exclusive mutation authority.
-        let first = match read_version_bytes(&mut file) {
-            Ok(bytes) => bytes,
+        let mut bytes = [0u8; 24];
+        let mut random = match File::open("/dev/urandom") {
+            Ok(f) => f,
             Err(e) => return file_error(e),
         };
-        let second = match read_version_bytes(&mut file) {
-            Ok(bytes) => bytes,
-            Err(e) => return file_error(e),
+        if let Err(e) = random.read_exact(&mut bytes) {
+            return file_error(e);
+        }
+        let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let mut versions = match self.versions.lock() {
+            Ok(v) => v,
+            Err(_) => {
+                return ToolResult::InternalError {
+                    error: "version store poisoned".into(),
+                };
+            }
         };
-        if first != second {
-            return ToolResult::ExecutionFailure {
-                error: "file changed during version read".into(),
-            };
+        // Bound memory use; tokens are intentionally ephemeral.
+        if versions.len() >= 128 {
+            versions.clear();
         }
-        // FNV-1a is a non-cryptographic fingerprint; never use it to
-        // authorize modifications or claim collision resistance.
-        let mut hash = 0xcbf29ce484222325_u64;
-        for byte in &first {
-            hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
-        }
+        versions.insert(path.to_owned(), (token.clone(), snap));
         ToolResult::Success {
-            output: format!("observation-fnv64:{hash:016x}:{}", first.len()),
+            output: format!("ephemeral-v1:{token}"),
         }
     }
 
@@ -112,6 +117,67 @@ impl Policy {
     fn get_file_version(&self, _path: &str) -> ToolResult {
         ToolResult::PolicyDenied {
             reason: "version observation is Linux-only".into(),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn modify_file_versioned(&self, path: &str, content: &str, token: &str) -> ToolResult {
+        if !self.trusted_exclusive {
+            return ToolResult::PolicyDenied {
+                reason: "versioned mutation requires trusted exclusive workspace configuration"
+                    .into(),
+            };
+        }
+        if !valid_relative(path) {
+            return denied();
+        }
+        if content.len() > MAX_WRITE_BYTES {
+            return ToolResult::ResourceLimit {
+                reason: "write exceeds 1 MiB limit".into(),
+            };
+        }
+        let mut versions = match self.versions.lock() {
+            Ok(v) => v,
+            Err(_) => {
+                return ToolResult::InternalError {
+                    error: "version store poisoned".into(),
+                };
+            }
+        };
+        let Some((issued, snapshot)) = versions.get(path) else {
+            return ToolResult::PolicyDenied {
+                reason: "missing or expired version token".into(),
+            };
+        };
+        if token != format!("ephemeral-v1:{issued}") {
+            return ToolResult::PolicyDenied {
+                reason: "version token mismatch".into(),
+            };
+        }
+        let snapshot = snapshot.clone();
+        // Consume token before attempting commit, including on failure. A caller must
+        // observe a fresh version after any ambiguous fsync outcome.
+        versions.remove(path);
+        match enforcer_transaction::atomic_linux::replace_under_exclusive_authority(
+            &self.workspace,
+            Path::new(path),
+            &snapshot,
+            content.as_bytes(),
+        ) {
+            Ok(_) => ToolResult::Success {
+                output: "modified; request get_file_version for new token".into(),
+            },
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => ToolResult::ExecutionFailure {
+                error: "stale version or concurrent modification".into(),
+            },
+            Err(e) => file_error(e),
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn modify_file_versioned(&self, _path: &str, _content: &str, _token: &str) -> ToolResult {
+        ToolResult::PolicyDenied {
+            reason: "versioned modification is Linux-only".into(),
         }
     }
 
@@ -452,4 +518,14 @@ mod adversarial_tests {
         fs::remove_dir(&link).unwrap();
         fs::remove_dir_all(base).unwrap();
     }
+}
+
+#[cfg(target_os = "linux")]
+fn valid_relative(path: &str) -> bool {
+    let relative = Path::new(path);
+    !path.is_empty()
+        && !relative.is_absolute()
+        && relative
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
 }
