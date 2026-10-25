@@ -1,5 +1,7 @@
+
 //! Linux E3 controlled-execution prototype. Not a filesystem sandbox.
 //! Only fixed, argument-free probes are supported; no shell or arbitrary executable.
+
 #[cfg(target_os = "linux")]
 use std::io;
 
@@ -17,7 +19,6 @@ pub enum ExecutionError {
 
 #[cfg(target_os = "linux")]
 pub fn run_fixed_probe(name: &str, uid: u32, gid: u32) -> Result<ExecutionOutcome, ExecutionError> {
-    use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     use std::thread;
     use std::time::{Duration, Instant};
@@ -27,40 +28,70 @@ pub fn run_fixed_probe(name: &str, uid: u32, gid: u32) -> Result<ExecutionOutcom
         "false" => "/usr/bin/false",
         _ => return Err(ExecutionError::Denied("command not allowlisted")),
     };
+
     unsafe extern "C" {
         fn geteuid() -> u32;
         fn setgroups(size: usize, groups: *const u32) -> i32;
+        fn setresgid(rgid: u32, egid: u32, sgid: u32) -> i32;
+        fn setresuid(ruid: u32, euid: u32, suid: u32) -> i32;
         fn prctl(option: i32, ...) -> i32;
     }
+
     const PR_SET_NO_NEW_PRIVS: i32 = 38;
-    // This prototype only works when a privileged supervisor can drop identity.
-    // Never execute under the trusted Enforcer's own identity.
+
+    // This prototype requires a privileged supervisor capable of
+    // dropping the child's credentials.
+    //
+    // Never execute the child under the trusted Enforcer's identity.
     if uid == 0 || gid == 0 || unsafe { geteuid() } != 0 {
         return Err(ExecutionError::Denied(
             "dedicated non-root identity and root supervisor required",
         ));
     }
+
     let mut command = Command::new(executable);
+
     command
         .env_clear()
         .current_dir("/")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .uid(uid)
-        .gid(gid);
-    // SAFETY: only async-signal-safe libc calls are made in pre_exec.
+        .stderr(Stdio::null());
+
+    // SAFETY:
+    // These operations execute in the child before exec.
+    //
+    // The order is security-critical:
+    // 1. Clear supplementary groups while privileged.
+    // 2. Drop real/effective/saved GIDs.
+    // 3. Drop real/effective/saved UIDs.
+    // 4. Prevent privilege gains through exec.
+    //
+    // Only async-signal-safe libc operations are performed here.
     unsafe {
-        command.pre_exec(|| {
+        use std::os::unix::process::CommandExt;
+
+        command.pre_exec(move || {
             if setgroups(0, std::ptr::null()) != 0 {
                 return Err(io::Error::last_os_error());
             }
+
+            if setresgid(gid, gid, gid) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+
+            if setresuid(uid, uid, uid) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+
             if prctl(PR_SET_NO_NEW_PRIVS, 1_usize, 0_usize, 0_usize, 0_usize) != 0 {
                 return Err(io::Error::last_os_error());
             }
+
             Ok(())
         });
     }
+
     let mut child = command.spawn().map_err(|e| {
         ExecutionError::Os(format!(
             "spawn failed: kind={:?}, errno={:?}, detail={}",
@@ -69,7 +100,9 @@ pub fn run_fixed_probe(name: &str, uid: u32, gid: u32) -> Result<ExecutionOutcom
             e
         ))
     })?;
+
     let deadline = Instant::now() + Duration::from_secs(3);
+
     loop {
         match child
             .try_wait()
@@ -80,16 +113,22 @@ pub fn run_fixed_probe(name: &str, uid: u32, gid: u32) -> Result<ExecutionOutcom
                     exit_code: status.code().unwrap_or(-1),
                 });
             }
+
             None if Instant::now() >= deadline => {
                 child
                     .kill()
                     .map_err(|e| ExecutionError::Os(e.to_string()))?;
+
                 child
                     .wait()
                     .map_err(|e| ExecutionError::Os(e.to_string()))?;
+
                 return Ok(ExecutionOutcome::TimedOut);
             }
-            None => thread::sleep(Duration::from_millis(10)),
+
+            None => {
+                thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 }
@@ -106,6 +145,7 @@ pub fn run_fixed_probe(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[cfg(target_os = "linux")]
     #[test]
     fn unknown_command_is_denied() {
@@ -114,6 +154,7 @@ mod tests {
             Err(ExecutionError::Denied("command not allowlisted"))
         );
     }
+
     #[test]
     fn no_privileged_execution_by_default() {
         assert!(matches!(
