@@ -1,8 +1,6 @@
 #[cfg(target_os = "linux")]
 use std::collections::HashMap;
 use std::fs::{self, File};
-#[cfg(target_os = "linux")]
-use std::io::Read as _;
 use std::io::{self, Read};
 use std::path::{Component, Path};
 #[cfg(target_os = "linux")]
