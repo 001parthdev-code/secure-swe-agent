@@ -37,6 +37,7 @@ impl Policy {
     pub fn evaluate(&self, request: ToolRequest) -> ToolResult {
         match request {
             ToolRequest::ReadFile { path } => self.read_file(&path),
+            ToolRequest::GetFileVersion { path } => self.get_file_version(&path),
             ToolRequest::CreateFile { path, content } => self.write_file(&path, &content, false),
             ToolRequest::ModifyFile { path, content } => self.write_file(&path, &content, true),
             ToolRequest::ModifyFileVersioned { .. } => ToolResult::PolicyDenied {
@@ -47,6 +48,70 @@ impl Policy {
                     reason: "capability not enabled in E1".into(),
                 }
             }
+        }
+    }
+
+    // Read-only integration: returns an informational snapshot fingerprint.
+    // This is NOT an authorization token or a safe compare-and-swap precondition.
+    // The mutation API remains disabled until exclusive authority is enforced.
+    #[cfg(target_os = "linux")]
+    fn get_file_version(&self, path: &str) -> ToolResult {
+        let relative = Path::new(path);
+        if path.is_empty()
+            || relative.is_absolute()
+            || relative
+                .components()
+                .any(|c| !matches!(c, Component::Normal(_)))
+        {
+            return denied();
+        }
+        let mut file = match enforcer_fs::open_relative(&self.workspace, relative) {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return denied(),
+            Err(e) => return file_error(e),
+        };
+        let metadata = match file.metadata() {
+            Ok(m) => m,
+            Err(e) => return file_error(e),
+        };
+        if !metadata.is_file() {
+            return denied();
+        }
+        if metadata.len() > MAX_READ_BYTES {
+            return ToolResult::ResourceLimit {
+                reason: "file exceeds 1 MiB limit".into(),
+            };
+        }
+        // Read twice and require consistent bytes. This remains observational,
+        // not a security proof of exclusive mutation authority.
+        let first = match read_version_bytes(&mut file) {
+            Ok(bytes) => bytes,
+            Err(e) => return file_error(e),
+        };
+        let second = match read_version_bytes(&mut file) {
+            Ok(bytes) => bytes,
+            Err(e) => return file_error(e),
+        };
+        if first != second {
+            return ToolResult::ExecutionFailure {
+                error: "file changed during version read".into(),
+            };
+        }
+        // FNV-1a is a non-cryptographic fingerprint; never use it to
+        // authorize modifications or claim collision resistance.
+        let mut hash = 0xcbf29ce484222325_u64;
+        for byte in &first {
+            hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+        }
+        ToolResult::Success {
+            output: format!("observation-fnv64:{hash:016x}:{}", first.len()),
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn get_file_version(&self, _path: &str) -> ToolResult {
+        ToolResult::PolicyDenied {
+            reason: "version observation is Linux-only".into(),
         }
     }
 
@@ -137,6 +202,21 @@ impl Policy {
             Err(e) => file_error(e),
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn read_version_bytes(file: &mut File) -> io::Result<Vec<u8>> {
+    use std::io::{Seek, SeekFrom};
+    file.seek(SeekFrom::Start(0))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_READ_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_READ_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "file exceeds version limit",
+        ));
+    }
+    Ok(bytes)
 }
 
 fn denied() -> ToolResult {

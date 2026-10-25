@@ -10,6 +10,10 @@ pub enum ToolRequest {
         path: String,
     },
 
+    GetFileVersion {
+        path: String,
+    },
+
     WriteFile {
         path: String,
         content: String,
