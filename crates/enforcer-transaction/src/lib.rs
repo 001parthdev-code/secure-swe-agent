@@ -1,4 +1,6 @@
 #[cfg(target_os = "linux")]
+pub mod atomic_linux;
+#[cfg(target_os = "linux")]
 pub mod version;
 
 // E2 transaction lifecycle validation.
