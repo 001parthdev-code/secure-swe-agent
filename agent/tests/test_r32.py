@@ -1,4 +1,5 @@
 import sys
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,8 +16,14 @@ class DurableA7Tests(unittest.TestCase):
         self.store = WorkflowStore(self.repo / 'state.sqlite')
         self.addCleanup(self.store.close)
         self.adapter = DurableA7(self.store)
-        self.approval = 'a' * 64
+        self.raw = b'fixture proposal'
+        self.approval = hashlib.sha256(self.raw).hexdigest()
         self.row = self.store.create(self.repo, self.approval)
+        self.proposal = self.repo / 'proposal.json'
+        self.proposal.write_bytes(self.raw)
+        artifacts = self.repo / 'state.sqlite.artifacts'
+        artifacts.mkdir()
+        (artifacts / (self.row['id'] + '.json')).write_bytes(self.raw)
 
     def test_successful_apply_is_durable(self):
         with patch('secure_swe_agent.durable_a7.workflow.apply', return_value={'status':'verified'}):

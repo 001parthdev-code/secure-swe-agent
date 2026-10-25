@@ -6,6 +6,8 @@ module intentionally does not retry external operations automatically.
 from __future__ import annotations
 
 import uuid
+import hashlib
+import os
 from pathlib import Path
 from typing import Callable
 
@@ -18,11 +20,48 @@ class DurableA7:
         self.store = store
 
     def prepare(self, repo: Path, proposal_file: Path, slug: str) -> dict:
-        # The branch creation is external; an exception here must not be
-        # represented as a successfully prepared workflow.
-        result = workflow.prepare(repo, proposal_file, slug)
-        record = self.store.create(repo, result["proposal_sha256"])
-        return {**result, "workflow_id": record["id"], "revision": record["revision"]}
+        """Journal intent and snapshot immutable proposal before branch creation.
+
+        Artifacts live alongside the operator-owned SQLite DB, never inside the
+        agent workspace. Failure after branch creation remains uncertain.
+        """
+        from .approval import digest, load_proposal
+        repo = Path(repo).resolve(strict=True)
+        raw = Path(proposal_file).read_bytes()
+        load_proposal(raw)
+        fingerprint = digest(raw)
+        record = self.store.create(repo, fingerprint, preparing=True)
+        task_id = record["id"]
+        artifacts = self.store.path.parent / (self.store.path.name + ".artifacts")
+        try:
+            artifacts.mkdir(mode=0o700, exist_ok=True)
+            # Exclusive creation prevents replacing another task's evidence.
+            target = artifacts / (task_id + ".json")
+            with target.open("xb") as output:
+                output.write(raw)
+                output.flush()
+                os.fsync(output.fileno())
+            result = workflow.prepare(repo, target, slug)
+            completed = self.store.transition(task_id, revision=0,
+                                              target="awaiting_apply_approval",
+                                              kind="prepare_confirmed")
+            return {**result, "workflow_id": task_id,
+                    "revision": completed["revision"]}
+        except BaseException:
+            # The branch may already exist. Never automatically repeat prepare.
+            self.store.transition(task_id, revision=0,
+                                  target="needs_reconciliation",
+                                  kind="prepare_uncertain")
+            raise
+
+    def proposal_path(self, workflow_id: str) -> Path:
+        row = self.store.get(workflow_id)
+        path = self.store.path.parent / (self.store.path.name + ".artifacts") / (workflow_id + ".json")
+        if path.is_symlink() or not path.is_file():
+            raise StateError("immutable proposal artifact missing or linked")
+        if hashlib.sha256(path.read_bytes()).hexdigest() != row["proposal_sha256"]:
+            raise StateError("immutable proposal artifact changed")
+        return path
 
     def _run(self, workflow_id: str, revision: int, expected: str,
              running: str, success: str, approval: str,
@@ -56,9 +95,12 @@ class DurableA7:
         row = self.store.get(workflow_id)
         if Path(repo).resolve() != Path(row["repo"]) or approval != row["proposal_sha256"]:
             raise StateError("repository or proposal approval mismatch")
+        stored_proposal = self.proposal_path(workflow_id)
+        if Path(proposal_file).read_bytes() != stored_proposal.read_bytes():
+            raise StateError("supplied proposal differs from immutable artifact")
         return self._run(workflow_id, revision, "awaiting_apply_approval", "applying",
                          "awaiting_commit_approval", approval,
-                         lambda: workflow.apply(repo, proposal_file, approval, enforcer),
+                         lambda: workflow.apply(repo, stored_proposal, approval, enforcer),
                          {"verified"})
 
     def commit(self, workflow_id: str, revision: int, repo: Path, relative: str,

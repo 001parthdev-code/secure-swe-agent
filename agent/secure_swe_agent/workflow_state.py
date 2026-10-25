@@ -18,23 +18,24 @@ class StateError(ValueError):
 
 
 _STATES = {
-    "awaiting_apply_approval", "applying", "awaiting_commit_approval",
+    "preparing", "awaiting_apply_approval", "applying", "awaiting_commit_approval",
     "committing", "awaiting_publish_approval", "publishing", "published",
     "verification_failed", "needs_reconciliation", "cancelled",
 }
 _TRANSITIONS = {
+    "preparing": {"awaiting_apply_approval", "needs_reconciliation"},
     "awaiting_apply_approval": {"applying", "cancelled"},
     "applying": {"awaiting_commit_approval", "verification_failed", "needs_reconciliation"},
     "awaiting_commit_approval": {"committing", "cancelled"},
     "committing": {"awaiting_publish_approval", "needs_reconciliation"},
     "awaiting_publish_approval": {"publishing", "cancelled"},
     "publishing": {"published", "needs_reconciliation"},
-    "needs_reconciliation": {"awaiting_commit_approval", "awaiting_publish_approval", "published", "verification_failed"},
+    "needs_reconciliation": {"awaiting_apply_approval", "awaiting_commit_approval", "awaiting_publish_approval", "published", "verification_failed"},
     "verification_failed": {"cancelled"},
     "published": set(),
     "cancelled": set(),
 }
-_IN_FLIGHT = {"applying", "committing", "publishing"}
+_IN_FLIGHT = {"preparing", "applying", "committing", "publishing"}
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -85,7 +86,7 @@ class WorkflowStore:
     def _rollback(self):
         self.db.execute("ROLLBACK")
 
-    def create(self, repo: Path, proposal_sha256: str) -> dict:
+    def create(self, repo: Path, proposal_sha256: str, *, preparing: bool = False) -> dict:
         if not isinstance(proposal_sha256, str) or not _HASH.fullmatch(proposal_sha256):
             raise StateError("invalid proposal digest")
         repo = Path(repo).resolve(strict=True)
@@ -96,10 +97,10 @@ class WorkflowStore:
         self._begin()
         try:
             self.db.execute("INSERT INTO workflows VALUES (?,?,?,?,?,?,?,?)",
-                            (workflow_id, str(repo), "awaiting_apply_approval", 0,
+                            (workflow_id, str(repo), "preparing" if preparing else "awaiting_apply_approval", 0,
                              proposal_sha256, None, None, now))
             self.db.execute("INSERT INTO events VALUES (?,?,?,?,?,?)",
-                            (workflow_id, 0, "awaiting_apply_approval", "created", "{}", now))
+                            (workflow_id, 0, "preparing" if preparing else "awaiting_apply_approval", "created", "{}", now))
             self.db.execute("COMMIT")
         except Exception:
             self._rollback()
@@ -140,7 +141,7 @@ class WorkflowStore:
                 raise StateError("stale workflow revision")
             if target not in _TRANSITIONS[row["state"]]:
                 raise StateError("invalid workflow transition")
-            if target in _IN_FLIGHT and approval_sha256 is None:
+            if target in (_IN_FLIGHT - {"preparing"}) and approval_sha256 is None:
                 raise StateError("approval digest required for sensitive operation")
             next_rev = revision + 1
             now = int(time.time())
@@ -159,7 +160,7 @@ class WorkflowStore:
         """Mark interrupted side effects uncertain. Never replay them automatically."""
         self._begin()
         try:
-            rows = self.db.execute("SELECT id, revision FROM workflows WHERE state IN (?,?,?)",
+            rows = self.db.execute("SELECT id, revision FROM workflows WHERE state IN (?,?,?,?)",
                                    tuple(sorted(_IN_FLIGHT))).fetchall()
             for row in rows:
                 now = int(time.time())
