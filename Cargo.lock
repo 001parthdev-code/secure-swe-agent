@@ -21,6 +21,7 @@ version = "0.1.0"
 dependencies = [
  "enforcer-fs",
  "enforcer-protocol",
+ "enforcer-transaction",
 ]
 
 [[package]]
