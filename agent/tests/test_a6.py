@@ -35,6 +35,17 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(result["status"], "approval_required")
         self.assertEqual(len(result["approval_sha256"]), 64)
 
+    def test_configured_https_origin_survives_git_ssh_rewrite(self):
+        git(self.repo, "config", "url.git@github.com:.insteadOf", "https://github.com/")
+        self.assertTrue(git(self.repo, "remote", "get-url", "origin").startswith("git@github.com:"))
+        result = preview_publish(self.repo, "example/demo", "main", title="Fix", body="Test")
+        self.assertEqual(result["status"], "approval_required")
+
+    def test_remote_with_embedded_credentials_rejected(self):
+        git(self.repo, "remote", "set-url", "origin", "https://user:secret@github.com/example/demo.git")
+        with self.assertRaisesRegex(GitBrokerError, "credential-free"):
+            preview_publish(self.repo, "example/demo", "main", title="Fix", body="Test")
+
     def test_wrong_origin_rejected(self):
         with self.assertRaises(GitBrokerError):
             preview_publish(self.repo, "someone/else", "main", title="Fix", body="Test")

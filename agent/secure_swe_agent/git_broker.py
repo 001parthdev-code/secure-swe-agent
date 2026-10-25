@@ -71,10 +71,14 @@ def prepare_commit(repo: Path, relative: str) -> dict:
     repo = _root(repo)
     branch = _branch(repo)
     relative = _file(repo, relative)
-    if _git(repo, "diff", "--cached", "--name-only"):
-        raise GitBrokerError("index must be empty before staging")
-    # Explicitly stage one reviewed file; never stage the whole repository.
-    _git(repo, "add", "--", relative)
+    staged = _git(repo, "diff", "--cached", "--name-only").splitlines()
+    if staged and staged != [relative]:
+        raise GitBrokerError("index contains unrelated staged files")
+    # Repeated reviews must not restage and silently change an approved diff.
+    if not staged:
+        _git(repo, "add", "--", relative)
+    elif _git(repo, "diff", "--", relative):
+        raise GitBrokerError("staged file has additional unstaged changes")
     names = _git(repo, "diff", "--cached", "--name-only").splitlines()
     if names != [relative]:
         raise GitBrokerError("staged file mismatch")

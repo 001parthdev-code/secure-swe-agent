@@ -37,6 +37,22 @@ class GitBrokerTests(unittest.TestCase):
         self.assertEqual(result["status"], "committed")
         self.assertEqual(result["branch"], "agent/task-fix-1")
 
+    def test_repeated_review_is_idempotent(self):
+        create_task_branch(self.repo, "repeat")
+        (self.repo / "code.py").write_text("value = 2\n")
+        first = prepare_commit(self.repo, "code.py")
+        second = prepare_commit(self.repo, "code.py")
+        self.assertEqual(first["staged_sha256"], second["staged_sha256"])
+        self.assertEqual(first["diff_untrusted"], second["diff_untrusted"])
+
+    def test_repeated_review_rejects_unstaged_changes(self):
+        create_task_branch(self.repo, "repeat")
+        (self.repo / "code.py").write_text("value = 2\n")
+        prepare_commit(self.repo, "code.py")
+        (self.repo / "code.py").write_text("value = 3\n")
+        with self.assertRaisesRegex(GitBrokerError, "unstaged changes"):
+            prepare_commit(self.repo, "code.py")
+
     def test_no_direct_main_commit(self):
         (self.repo / "code.py").write_text("value = 2\n")
         with self.assertRaises(GitBrokerError):

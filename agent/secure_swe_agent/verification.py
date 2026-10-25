@@ -53,20 +53,7 @@ def verify_calculator_fixture(
         (fixture / "calculator.py").write_bytes(source)
         (fixture / "test_calculator.py").write_bytes(tests)
 
-        command = [
-    sys.executable,
-    "-B",
-    "-c",
-    (
-        "import calculator; "
-        "print('CALCULATOR_PATH:', calculator.__file__); "
-        "print('CALCULATOR_RESULT:', calculator.subtract(8, 3)); "
-        "import unittest; "
-        "suite = unittest.defaultTestLoader.loadTestsFromName('test_calculator'); "
-        "result = unittest.TextTestRunner(verbosity=2).run(suite); "
-        "raise SystemExit(0 if result.wasSuccessful() else 1)"
-    ),
-]
+        command = [sys.executable, "-B", "-m", "unittest", "-v", "test_calculator"]
 
         try:
             result = subprocess.run(
