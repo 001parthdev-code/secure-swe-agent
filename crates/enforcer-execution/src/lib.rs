@@ -1,6 +1,5 @@
-
-//! Linux E3 controlled-execution prototype. Not a filesystem sandbox.
-//! Only fixed, argument-free probes are supported; no shell or arbitrary executable.
+// Linux E3 controlled-execution prototype. Not a filesystem sandbox.
+// Only fixed, argument-free probes are supported; no shell or arbitrary executable.
 
 #[cfg(target_os = "linux")]
 use std::io;
