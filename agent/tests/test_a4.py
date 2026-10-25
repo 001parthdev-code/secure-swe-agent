@@ -27,14 +27,31 @@ class VerificationTests(unittest.TestCase):
         source.write_text('def subtract(a, b):\n    return a + b\n')
         self.assertEqual(verify_calculator_fixture(self.workspace)['status'], 'failed')
         source.write_text('def subtract(a, b):\n    return a - b\n')
-        self.assertEqual(verify_calculator_fixture(self.workspace)['status'], 'passed')
+        result = verify_calculator_fixture(self.workspace)
+
+        self.assertEqual(
+            result["status"],
+            "passed",
+            f"Post-fix verification failed. Full result: {result!r}",
+        )
 
     def test_missing_fixture_denied(self):
         with self.assertRaises(VerificationError):
             verify_calculator_fixture(self.workspace)
 
     def test_symlink_denied(self):
-        (self.fixture / 'calculator.py').symlink_to(self.fixture / 'test_calculator.py')
+        link = self.fixture / "calculator.py"
+        target = self.fixture / "test_calculator.py"
+
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            if sys.platform == "win32" and getattr(exc, "winerror", None) == 1314:
+                self.skipTest(
+                "Windows symlink creation privilege unavailable"
+            )
+            raise
+
         with self.assertRaises(VerificationError):
             verify_calculator_fixture(self.workspace)
 
