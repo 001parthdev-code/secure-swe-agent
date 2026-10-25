@@ -61,9 +61,14 @@ pub fn run_fixed_probe(name: &str, uid: u32, gid: u32) -> Result<ExecutionOutcom
             Ok(())
         });
     }
-    let mut child = command
-        .spawn()
-        .map_err(|e| ExecutionError::Os(e.to_string()))?;
+    let mut child = command.spawn().map_err(|e| {
+        ExecutionError::Os(format!(
+            "spawn failed: kind={:?}, errno={:?}, detail={}",
+            e.kind(),
+            e.raw_os_error(),
+            e
+        ))
+    })?;
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         match child

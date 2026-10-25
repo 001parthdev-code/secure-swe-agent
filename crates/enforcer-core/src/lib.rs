@@ -98,9 +98,12 @@ impl Policy {
             Err(enforcer_execution::ExecutionError::Denied(reason)) => ToolResult::PolicyDenied {
                 reason: reason.into(),
             },
-            Err(enforcer_execution::ExecutionError::Os(_)) => ToolResult::ExecutionFailure {
-                error: "restricted process launch failed".into(),
-            },
+            Err(enforcer_execution::ExecutionError::Os(e)) => {
+                eprintln!("E3_LINUX_EXECUTION_DIAGNOSTIC: {e}");
+                ToolResult::ExecutionFailure {
+                    error: "restricted process launch failed".into(),
+                }
+            }
         }
     }
 
