@@ -32,6 +32,8 @@ class DurableA7:
         fingerprint = digest(raw)
         record = self.store.create(repo, fingerprint, preparing=True)
         task_id = record["id"]
+        owner = uuid.uuid4().hex
+        fence = self.store.acquire_operation(task_id, owner)
         artifacts = self.store.path.parent / (self.store.path.name + ".artifacts")
         try:
             artifacts.mkdir(mode=0o700, exist_ok=True)
@@ -53,6 +55,8 @@ class DurableA7:
                                   target="needs_reconciliation",
                                   kind="prepare_uncertain")
             raise
+        finally:
+            self.store.release_operation(task_id, owner, fence)
 
     def proposal_path(self, workflow_id: str) -> Path:
         row = self.store.get(workflow_id)
@@ -69,26 +73,30 @@ class DurableA7:
         row = self.store.get(workflow_id)
         if row["revision"] != revision or row["state"] != expected:
             raise StateError("stale or invalid workflow state")
-        # A successful CAS is required before any external side effect.
-        row = self.store.transition(workflow_id, revision=revision, target=running,
-                                    approval_sha256=approval,
-                                    operation_id=uuid.uuid4().hex)
+        # SQLite ownership excludes other coordinators even before the CAS.
+        owner = uuid.uuid4().hex
+        fence = self.store.acquire_operation(workflow_id, owner)
         try:
-            result = operation()
-        except BaseException:
-            # Including KeyboardInterrupt: external outcome may be unknown.
-            self.store.transition(workflow_id, revision=row["revision"],
-                                  target="needs_reconciliation", kind="operation_exception")
-            raise
-        if result.get("status") not in accepted:
-            target = "verification_failed" if running == "applying" else "needs_reconciliation"
-            self.store.transition(workflow_id, revision=row["revision"],
-                                  target=target, kind="operation_unconfirmed")
-            return {**result, "workflow_id": workflow_id, "state": target}
-        finished = self.store.transition(workflow_id, revision=row["revision"],
-                                         target=success, kind="operation_confirmed")
-        return {**result, "workflow_id": workflow_id,
-                "state": finished["state"], "revision": finished["revision"]}
+            row = self.store.transition(workflow_id, revision=revision, target=running,
+                                        approval_sha256=approval,
+                                        operation_id=uuid.uuid4().hex)
+            try:
+                result = operation()
+            except BaseException:
+                self.store.transition(workflow_id, revision=row["revision"],
+                                      target="needs_reconciliation", kind="operation_exception")
+                raise
+            if result.get("status") not in accepted:
+                target = "verification_failed" if running == "applying" else "needs_reconciliation"
+                self.store.transition(workflow_id, revision=row["revision"],
+                                      target=target, kind="operation_unconfirmed")
+                return {**result, "workflow_id": workflow_id, "state": target}
+            finished = self.store.transition(workflow_id, revision=row["revision"],
+                                             target=success, kind="operation_confirmed")
+            return {**result, "workflow_id": workflow_id,
+                    "state": finished["state"], "revision": finished["revision"]}
+        finally:
+            self.store.release_operation(workflow_id, owner, fence)
 
     def apply(self, workflow_id: str, revision: int, repo: Path,
               proposal_file: Path, approval: str, enforcer: Path) -> dict:
