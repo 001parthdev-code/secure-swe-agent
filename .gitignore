@@ -99,6 +99,7 @@ benchmarks/results/
 
 # Preserve Cargo.lock for reproducible builds
 !Cargo.lock
+!enforcer/Cargo.lock
 
 # Preserve source, tests, documentation,
 # CI workflows, and architecture records
