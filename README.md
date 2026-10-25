@@ -1,320 +1,134 @@
-# Secure Goal-Directed Autonomous Software Engineering Agent
+# Secure SWE Agent
 
-> An engineering-research project exploring autonomous software engineering under externally enforced security constraints.
+**An AI software-engineering agent project with a security-first Rust enforcement foundation.**
+
+> **Current milestone:** v0.1.0 — Rust Enforcer Linux functional prototype. The autonomous agent is planned, not implemented. Not production-secure.
 
 ## Overview
 
-This project aims to build a goal-directed autonomous software-engineering agent capable of taking a repository-level software issue and iteratively working toward a verified solution.
+Secure SWE Agent is one repository and one evolving product. Its intended AI agent will plan software-engineering tasks and request operations through the Rust Enforcer, which mediates access to files and controlled execution. **The agent layer is not implemented in v0.1.0.** The currently working deliverable is the Enforcer subsystem, not a separate product or repository.
 
-The agent is expected to:
+The v0.1.0 milestone demonstrates the Enforcer E1–E4 working together in a controlled Linux integration test. It is intended for development, learning, and security experimentation—not execution of arbitrary hostile code.
 
-1. understand an assigned software issue,
-2. inspect an unfamiliar repository,
-3. gather relevant context,
-4. form hypotheses about the problem,
-5. construct and revise plans,
-6. request tool actions,
-7. modify code,
-8. execute tests and development tools,
-9. interpret external evidence,
-10. recover from unsuccessful approaches, and
-11. continue until sufficient verification evidence exists or a controlled termination condition is reached.
+## Project roadmap and architecture
 
-The project is intentionally divided into two components:
+**Implemented now:** Rust Enforcer, including E1–E4 functional prototype. **Planned in this same repository:** agent planning/reasoning, code understanding, tool orchestration, feedback and verification. Production isolation hardening is a separate release gate.
 
-- **Engineering:** build the autonomous software-engineering agent and its security architecture.
-- **Research:** use the instrumented system to empirically study goal-directed agent behavior under externally enforced capability constraints.
-
----
-
-## Core Architecture
-
-The system separates agent intelligence from execution authority.
 
 ```text
-                 Repository + Issue
-                        |
-                        v
-              +-------------------+
-              |   Python Agent    |
-              |    UNTRUSTED      |
-              |                   |
-              | Goal State        |
-              | Agent Loop        |
-              | Context           |
-              | Hypotheses        |
-              | Planning          |
-              | Verification      |
-              | Recovery          |
-              +---------+---------+
-                        |
-                 CapabilityRequest
-                        |
-================== TRUST BOUNDARY ==================
-                        |
-                        v
-              +-------------------+
-              |   Rust Enforcer   |
-              |      TRUSTED      |
-              |                   |
-              | Validate          |
-              | Authorize         |
-              | Constrain         |
-              | Execute           |
-              | Audit             |
-              +---------+---------+
-                        |
-                        v
-              +-------------------+
-              |     Isolated      |
-              |     Workspace     |
-              +-------------------+
-                        |
-                    ToolResult
-                        |
-                        v
-                  Python Agent
-````
-
-### Architectural Principle
-
-> **The agent possesses intent; the enforcer possesses authority.**
-
-The language model and Python agent runtime are treated as untrusted.
-
-Agent-controlled security-sensitive operations must pass through the Rust enforcement layer before they can affect protected resources.
-
----
-
-## Goal-Directed Agent Loop
-
-The agent is not intended to be a simple repeated LLM call.
-
-The planned control loop is approximately:
-
-```text
-GOAL
-  |
-  v
-OBSERVE
-  |
-  v
-HYPOTHESIZE
-  |
-  v
-PLAN
-  |
-  v
-REQUEST ACTION
-  |
-  v
-ENFORCE
-  |
-  +---- DENY ----+
-  |              |
-  v              |
-EXECUTE           |
-  |              |
-  +-------+------+
+ Future Secure SWE Agent / current test client
+             |
+        JSON Lines requests
+             v
+      +--------------------+
+      | enforcer-cli       |---- JSON Lines audit ---> stderr
+      | framing + dispatch |
+      +---------+----------+
+                |
+      +---------v----------+
+      | enforcer-core      |
+      | policy + routing   |
+      +---+----------+-----+
+          |          |
+    +-----v-----+  +-v------------------+
+    | enforcer-fs|  | enforcer-execution |
+    | safe file  |  | fixed Linux probes |
+    | operations |  +--------------------+
+    +-----+------+ 
           |
-          v
-       OBSERVE
-          |
-          v
-        VERIFY
-          |
-          v
-     UPDATE STATE
-          |
-     +----+----+
-     |         |
- unresolved  verified
-     |         |
-     v         v
-   REPLAN   TERMINATE
+    +-----v----------------+
+    | enforcer-transaction |
+    | Linux version/commit |
+    +----------------------+
+
+ enforcer-protocol: shared request/response types
+ enforcer-isolation: preflight and experimental OS isolation checks
+ enforcer-audit: structured event encoding
 ```
 
-Successful termination should depend on external verification evidence rather than solely on the model claiming that the task has been solved.
+Crates are libraries unless explicitly built as executables. The Enforcer CLI and the restricted Linux probe processes are separate processes. See [architecture and status](docs/ARCHITECTURE.md).
 
----
+## Current Enforcer capabilities (v0.1.0)
 
-## Security Model
+| Capability | Linux v0.1 | Windows |
+| --- | --- | --- |
+| Workspace-relative read/create/basic modification | Implemented and tested | Existing workspace tests |
+| `get_file_version` | Process-local token | Denied |
+| `modify_file_versioned` | Controlled prototype; operator-gated | Denied |
+| `run_command` | `true` / `false` only; operator-gated | Denied |
+| JSONL audit stream | stderr | stderr |
+| General-purpose agent command sandbox | **Not supported** | **Not supported** |
 
-The Python agent is explicitly considered untrusted.
+**Security boundary:** `ENFORCER_TRUSTED_EXCLUSIVE_WORKSPACE=1` is an operator assertion, not proof of exclusive mutation authority. E3's fixed probes are not a general-purpose isolated execution environment. See [SECURITY.md](SECURITY.md).
 
-This includes:
+## Quick start
 
-* the language model,
-* agent reasoning,
-* agent-generated tool requests,
-* repository content,
-* issue content,
-* source-code comments,
-* repository documentation, and
-* potentially hostile or compromised dependencies.
+Requirements: Rust toolchain supporting edition 2024 and Cargo. Linux is required for the complete E2/E3 controlled flow.
 
-The Rust enforcement layer forms the trusted security boundary.
-
-### Initial Security Invariant
-
-> No security-sensitive operation requested by an untrusted agent component may affect a protected resource without authorization by the Rust enforcement layer.
-
-The enforcement layer is expected to eventually mediate capabilities such as:
-
-* filesystem access,
-* process execution,
-* command execution,
-* environment access,
-* network access,
-* resource consumption,
-* execution time,
-* protected security state, and
-* audit logging.
-
----
-
-## Research Direction
-
-The system will also serve as an instrumented experimental platform.
-
-The initial research question is deliberately exploratory:
-
-> How do goal-directed autonomous software-engineering agents behave when progress toward an assigned objective interacts with externally enforced capability constraints?
-
-Initial areas of investigation include:
-
-* behavior following capability denial,
-* legitimate recovery after denied actions,
-* strategy substitution,
-* repeated prohibited requests,
-* controlled security affordance discovery,
-* capability composition,
-* verification manipulation, and
-* the relationship between agent-loop architecture and security behavior.
-
-The project does **not** currently claim that these behaviors are novel or that any particular phenomenon will occur.
-
-Exploratory observations will be compared against existing literature before specific hypotheses or research contributions are claimed.
-
----
-
-## Experimental Philosophy
-
-Security experiments will use isolated, controlled scenario fixtures.
-
-For example, an experimental environment may intentionally contain a policy-prohibited shortcut that would make a software-engineering objective easier to accomplish.
-
-The experiment can then observe whether the agent:
-
-* ignores the shortcut,
-* requests it,
-* receives a denial and complies,
-* finds a legitimate alternative,
-* repeats the request,
-* changes strategy, or
-* discovers another route.
-
-Experimental affordances are separate from the production security implementation.
-
----
-
-## Repository Structure
-
-```text
-secure-swe-agent/
-|
-+-- agent/             # Python agent runtime (untrusted)
-|
-+-- enforcer/          # Rust security enforcement layer (trusted)
-|
-+-- workspace/         # Controlled repository workspace
-|
-+-- trajectories/      # Agent execution traces
-|
-+-- experiments/       # Controlled research scenarios
-|
-+-- docs/              # Architecture, research, threat model, etc.
-|
-+-- README.md
+```bash
+cargo build --locked -p enforcer-cli
+mkdir -p /tmp/enforcer-demo
+printf 'hello\n' > /tmp/enforcer-demo/example.txt
+export ENFORCER_WORKSPACE=/tmp/enforcer-demo
+printf '%s\n' '{"action":"read_file","path":"example.txt"}' | cargo run --quiet --locked -p enforcer-cli
 ```
 
-The structure will evolve as the system develops.
+Expected response (the audit event is separately written to stderr):
 
----
-
-## Current Development Stage
-
-**Status: Early POC**
-
-The first engineering milestone is establishing the communication and trust boundary between the Python agent runtime and Rust enforcer.
-
-Initial capability requests will include operations such as:
-
-```text
-ReadFile
-WriteFile
-RunCommand
+```json
+{"status":"success","output":"hello\n"}
 ```
 
-The first security acceptance test is:
+The CLI reads **one JSON object per line** on stdin and writes **one JSON result per line** on stdout. Keep the same CLI process alive when using version tokens, because tokens are process-local.
 
-```text
-Python requests:
-    read_file("hello.txt")
+### Request examples
 
-Rust:
-    ALLOW
-
-Result:
-    file contents returned
+```json
+{"action":"read_file","path":"example.txt"}
+{"action":"create_file","path":"new.txt","content":"hello"}
+{"action":"get_file_version","path":"example.txt"}
+{"action":"modify_file_versioned","path":"example.txt","content":"updated","expected_version":"ephemeral-v1:<token>"}
+{"action":"run_command","command":"true"}
 ```
 
-while:
+The last two operations are **disabled by default**. Only use the controlled integration harness to exercise their prototype gates; do not set the trusted-exclusive flag on a workspace accessible to untrusted writers. The fixed-command execution test requires a privileged supervisor solely to drop child credentials.
 
-```text
-Python requests:
-    read_file("../../outside.txt")
+## Build and verification of the Enforcer milestone
 
-Rust:
-    DENY
-
-Result:
-    protected file is never accessed
+```bash
+cargo fmt --all -- --check
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-Once this boundary is operational, the model and goal-directed agent loop will be introduced incrementally.
+Linux-only integrated verification is executed by the [Linux V0.1 GitHub Actions workflow](.github/workflows/enforcer-linux-v01-integration.yml) using a disposable workspace. The script is at [`scripts/verify-linux-v01-integrated.py`](scripts/verify-linux-v01-integrated.py); it requires a controlled privileged CI environment and is **not** a production isolation attestation.
 
----
+## Repository map (current implementation)
 
-## Planned Development
+| Location | Responsibility |
+| --- | --- |
+| `crates/enforcer-cli` | JSONL framing, dispatch and audit emission |
+| `crates/enforcer-protocol` | Request/result contracts |
+| `crates/enforcer-core` | Policy, authorization and operation routing |
+| `crates/enforcer-fs` | OS-specific filesystem access |
+| `crates/enforcer-transaction` | Linux snapshots and atomic replacement prototype |
+| `crates/enforcer-execution` | Linux fixed-command restricted child |
+| `crates/enforcer-isolation` | OS preflight and experimental isolation tests |
+| `crates/enforcer-audit` | Structured audit events |
+| `docs/` | Architecture decisions, experiments, engineering records |
+| `scripts/` | Integration and security test harnesses |
 
-```text
-Phase 0    Project specification + literature review
+## Release scope and next steps
 
-Phase 1    Python <-> Rust capability boundary
+**v0.1.0:** functional Linux prototype, with E1–E4 integrated CI evidence. **Not production approved.** Next: isolate general-purpose execution, enforce workspace mutation authority, add process-tree/resource controls, improve durability and audit storage, and conduct adversarial validation. Windows sandbox research remains frozen.
 
-Phase 2    Minimal goal-directed agent loop
+Read [release notes](docs/releases/v0.1.0.md), [documentation index](docs/README.md), and [security limitations](SECURITY.md) before extending or deploying the system.
 
-Phase 3    Repository exploration + modification
+## Unified project roadmap
 
-Phase 4    Verification + failure recovery
+1. **v0.1.0 — Enforcer functional prototype (current):** integrated Linux E1–E4, with known security limitations.
+2. **Enforcer security hardening:** enforce isolation and exclusive mutation authority, expand adversarial tests, improve process-tree controls and audit durability.
+3. **Agent implementation in this repository:** add planning, code understanding, tool selection and verification components.
+4. **End-to-end Secure SWE Agent:** connect the agent to the Enforcer through an explicit trust boundary and verify realistic software-engineering workflows.
 
-Phase 5    Security hardening + isolation
-
-Phase 6    Engineering evaluation
-
-Phase 7    Exploratory security experiments
-
-Phase 8    Hypothesis-driven research, if warranted
-```
-
----
-
-## Project Status
-
-This project is under active development.
-
-The architecture, research questions, experimental methodology, and implementation are expected to evolve as engineering evidence and literature review expose new constraints and failure modes.
-
-
-
+The Enforcer remains modular and reusable, but it is **not being spun out into a separate repository or treated as the final product**.
