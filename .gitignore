@@ -7,8 +7,6 @@
 **/target/
 *.rs.bk
 
-# Legacy Enforcer (retired)
-/enforcer/
 
 # Python environments
 .venv/
@@ -107,3 +105,6 @@ benchmarks/results/
 
 # Generated Windows isolation traces
 /isolation-trace-output/
+# Nested Rust workspace build artifacts
+/enforcer/target/
+/enforcer/isolation-trace-output/

@@ -5,6 +5,9 @@ on:
 jobs:
   linux-v01-integrated:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: enforcer
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
