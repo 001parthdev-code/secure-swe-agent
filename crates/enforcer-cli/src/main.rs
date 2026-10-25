@@ -28,6 +28,15 @@ fn handle(line: &[u8], policy: &Policy) -> ToolResult {
     }
 }
 
+fn request_action(line: &[u8]) -> &'static str {
+    let line = line.strip_suffix(b"\n").unwrap_or(line);
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    match serde_json::from_slice::<ToolRequest>(line) {
+        Ok(request) => enforcer_audit::action(&request),
+        Err(_) => "invalid",
+    }
+}
+
 fn main() {
     let workspace = match std::env::var_os("ENFORCER_WORKSPACE") {
         Some(path) if !path.is_empty() => path,
@@ -46,6 +55,9 @@ fn main() {
     let stdin = io::stdin();
     let mut input = stdin.lock();
     let mut stdout = io::stdout().lock();
+    let stderr = io::stderr();
+    let mut audit_sink = stderr.lock();
+    let mut audit_sequence: u64 = 0;
     loop {
         let mut line = Vec::new();
         let read = match input
@@ -62,6 +74,12 @@ fn main() {
         if read == 0 {
             break;
         }
+        let action = if line.len() > MAX_REQUEST_BYTES + 2 {
+            "invalid"
+        } else {
+            request_action(&line)
+        };
+        let request_bytes = line.len();
         let result = if line.len() == MAX_REQUEST_BYTES + 3 && !line.ends_with(b"\n") {
             // Drain the rest of the oversized request before processing another.
             let mut drain = Vec::new();
@@ -80,6 +98,20 @@ fn main() {
         } else {
             handle(&line, &policy)
         };
+        audit_sequence = match audit_sequence.checked_add(1) {
+            Some(next) => next,
+            None => std::process::exit(4),
+        };
+        if let Err(e) = enforcer_audit::record(
+            &mut audit_sink,
+            audit_sequence,
+            action,
+            &result,
+            request_bytes,
+        ) {
+            eprintln!("audit sink failed: {e}");
+            std::process::exit(4);
+        }
         let response = serde_json::to_string(&result).expect("result serialization");
         if writeln!(stdout, "{response}")
             .and_then(|_| stdout.flush())

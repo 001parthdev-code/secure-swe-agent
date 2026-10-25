@@ -5,11 +5,16 @@ version = 4
 [[package]]
 name = "enforcer-audit"
 version = "0.1.0"
+dependencies = [
+ "enforcer-protocol",
+ "serde_json",
+]
 
 [[package]]
 name = "enforcer-cli"
 version = "0.1.0"
 dependencies = [
+ "enforcer-audit",
  "enforcer-core",
  "enforcer-protocol",
  "serde_json",
