@@ -27,6 +27,17 @@ class ApprovalRequest(BaseModel):
     proposal_sha256: str = Field(min_length=64, max_length=64)
 
 
+class CommitApprovalRequest(BaseModel):
+    revision: int = Field(ge=1)
+    staged_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    message: str = Field(min_length=1, max_length=120)
+
+
+class PublishApprovalRequest(BaseModel):
+    revision: int = Field(ge=1)
+    approval_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
 class RejectRequest(BaseModel):
     revision: int = Field(ge=1)
 
@@ -46,6 +57,9 @@ class LiveConfig:
         if not re.fullmatch(r'http://127\.0\.0\.1:\d{2,5}', origin):
             raise ValueError('origin must be an exact local Vite origin')
         self.token, self.origin = token, origin
+        # Operator-owned fixed destination; never accept a model- or browser-selected repo.
+        self.github_repo = os.environ.get('SWE_GITHUB_REPO', '')
+        self.publish_base = os.environ.get('SWE_GITHUB_BASE', 'main')
         self.workspace = self.repo / 'workspace'
         self.fixture = self.workspace / 'calculator' / 'calculator.py'
         if (not self.fixture.is_file() or self.fixture.is_symlink()
@@ -88,14 +102,14 @@ def create_app(config: LiveConfig) -> FastAPI:
         if not re.search(r'\bsubtract(?:ion)?\b', payload.description, re.I):
             raise HTTPException(status_code=422, detail='Only the trusted subtraction fixture is supported')
         with lock:
-            if active and tasks[active]['status'] == 'analyzing':
-                raise HTTPException(status_code=409, detail='another analysis is in progress')
+            if active and tasks[active]['status'] not in ('published', 'rejected', 'failed'):
+                raise HTTPException(status_code=409, detail='current workflow must be completed or reconciled first')
             task_id = uuid.uuid4().hex
             task = {'id': task_id, 'title': payload.description, 'repository': 'calculator-demo',
                     'branch': 'not created', 'status': 'analyzing', 'model': 'qwen3.5:4b',
                     'revision': 1, 'events': [{'id': uuid.uuid4().hex, 'timestamp': 'now',
                     'title': 'Live Qwen analysis started', 'detail': 'Enforcer read-only tool access',
-                    'kind': 'pending'}], 'changes': [], 'tests': None, 'prUrl': None}
+                    'kind': 'pending'}], 'changes': [], 'tests': None, 'prUrl': None, 'commitReview': None, 'publishReview': None}
             tasks[task_id] = task
             active = task_id
         thread = threading.Thread(target=analyze, args=(task_id,), daemon=True)
@@ -234,6 +248,143 @@ def create_app(config: LiveConfig) -> FastAPI:
                 task['events'].append({'id': uuid.uuid4().hex, 'timestamp': 'now',
                     'title': 'Operation outcome uncertain',
                     'detail': str(exc)[:200] + '; inspect repository before retrying', 'kind': 'error'})
+
+
+    def event(task: dict, title: str, detail: str, kind: str = 'info') -> None:
+        task['events'].append({'id': uuid.uuid4().hex, 'timestamp': 'now',
+                               'title': title, 'detail': detail[:240], 'kind': kind})
+
+    @app.post('/api/tasks/{task_id}/review-commit')
+    def review_commit(task_id: str, x_operator_token: str | None = Header(default=None)):
+        authorize(x_operator_token)
+        from . import workflow
+        with lock:
+            task = tasks.get(task_id)
+            if task is None:
+                raise HTTPException(404, 'task not found')
+            if task['status'] != 'awaiting_commit_approval':
+                raise HTTPException(409, 'task is not ready for commit review')
+            # Prevent another request from overlapping staging and review.
+            task['status'] = 'reviewing_commit'
+            task['revision'] += 1
+        try:
+            result = workflow.review_commit(config.repo, 'workspace/calculator/calculator.py')
+            with lock:
+                task['commitReview'] = {'diff': result['diff_untrusted'],
+                                        'staged_sha256': result['staged_sha256']}
+                task['status'] = 'awaiting_commit_approval'
+                task['revision'] += 1
+                event(task, 'Git commit review ready', 'Review exact staged diff', 'success')
+                return dict(task)
+        except Exception as exc:
+            with lock:
+                task['status'] = 'needs_reconciliation'
+                task['revision'] += 1
+                event(task, 'Commit review failed', str(exc), 'error')
+            raise HTTPException(409, 'commit review failed; operator inspection required') from None
+
+    @app.post('/api/tasks/{task_id}/approve-commit')
+    def approve_commit(task_id: str, payload: CommitApprovalRequest,
+                       x_operator_token: str | None = Header(default=None)):
+        authorize(x_operator_token)
+        from . import workflow
+        with lock:
+            task = tasks.get(task_id)
+            if task is None:
+                raise HTTPException(404, 'task not found')
+            review = task.get('commitReview')
+            if (task['status'] != 'awaiting_commit_approval' or
+                    task['revision'] != payload.revision or not review or
+                    not secrets.compare_digest(review['staged_sha256'], payload.staged_sha256)):
+                raise HTTPException(409, 'stale or unreviewed commit approval')
+            task['status'] = 'committing'
+            task['revision'] += 1
+        try:
+            result = workflow.commit(config.repo, 'workspace/calculator/calculator.py',
+                                     payload.staged_sha256, payload.message)
+            with lock:
+                task['status'] = 'committed'
+                task['revision'] += 1
+                task['commit'] = result['commit']
+                task['commitReview'] = None
+                event(task, 'Approved commit created', result['commit'], 'success')
+                return dict(task)
+        except Exception as exc:
+            with lock:
+                task['status'] = 'needs_reconciliation'
+                task['revision'] += 1
+                event(task, 'Commit outcome uncertain', str(exc), 'error')
+            raise HTTPException(409, 'commit outcome uncertain; operator inspection required') from None
+
+    @app.post('/api/tasks/{task_id}/review-publish')
+    def review_publish(task_id: str, x_operator_token: str | None = Header(default=None)):
+        authorize(x_operator_token)
+        from . import workflow
+        if not config.github_repo:
+            raise HTTPException(409, 'SWE_GITHUB_REPO is not configured')
+        with lock:
+            task = tasks.get(task_id)
+            if task is None:
+                raise HTTPException(404, 'task not found')
+            if task['status'] != 'committed':
+                raise HTTPException(409, 'task must be committed first')
+            task['status'] = 'reviewing_publish'
+            task['revision'] += 1
+        title = 'Fix calculator subtraction bug'
+        body = 'Approved Secure SWE Agent calculator correction; trusted regression tests passed.'
+        try:
+            plan = workflow.review_publish(config.repo, config.github_repo,
+                                           config.publish_base, title, body)
+            if plan['head'] != task.get('commit'):
+                raise RuntimeError('published commit does not match approved task commit')
+            with lock:
+                task['publishReview'] = {k: plan[k] for k in
+                    ('github_repo', 'branch', 'head', 'base', 'title', 'body', 'approval_sha256')}
+                task['status'] = 'awaiting_publish_approval'
+                task['revision'] += 1
+                event(task, 'GitHub publication review ready', 'Review destination and commit', 'success')
+                return dict(task)
+        except Exception as exc:
+            with lock:
+                task['status'] = 'needs_reconciliation'
+                task['revision'] += 1
+                event(task, 'Publication review failed', str(exc), 'error')
+            raise HTTPException(409, 'publication review failed; operator inspection required') from None
+
+    @app.post('/api/tasks/{task_id}/approve-publish')
+    def approve_publish(task_id: str, payload: PublishApprovalRequest,
+                        x_operator_token: str | None = Header(default=None)):
+        authorize(x_operator_token)
+        from . import workflow
+        with lock:
+            task = tasks.get(task_id)
+            if task is None:
+                raise HTTPException(404, 'task not found')
+            plan = task.get('publishReview')
+            if (task['status'] != 'awaiting_publish_approval' or
+                    task['revision'] != payload.revision or not plan or
+                    not secrets.compare_digest(plan['approval_sha256'], payload.approval_sha256)):
+                raise HTTPException(409, 'stale or unreviewed publication approval')
+            task['status'] = 'publishing'
+            task['revision'] += 1
+        try:
+            result = workflow.publish(config.repo, plan['github_repo'], plan['base'],
+                                      plan['title'], plan['body'], plan['approval_sha256'])
+            if result.get('status') not in ('pull_request_created', 'pull_request_exists'):
+                raise RuntimeError('GitHub broker did not confirm publication')
+            with lock:
+                task['status'] = 'published'
+                task['revision'] += 1
+                task['prUrl'] = result['url']
+                task['publishReview'] = None
+                event(task, 'GitHub PR confirmed', result['url'], 'success')
+                return dict(task)
+        except Exception as exc:
+            with lock:
+                task['status'] = 'needs_reconciliation'
+                task['revision'] += 1
+                event(task, 'Publication outcome uncertain', str(exc), 'error')
+            raise HTTPException(409, 'publication outcome uncertain; inspect GitHub before retrying') from None
 
 
     return app

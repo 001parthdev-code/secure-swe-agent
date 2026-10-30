@@ -18,9 +18,6 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
   }
   return payload as T;
 }
-const unavailable = async (): Promise<Task> => {
-  throw new Error('Live approval is not enabled yet. No operation was performed.');
-};
 export const liveApi: WorkflowApi = {
   async getTask() {
     const task = await request<Task | {status: 'no_task'}>('/tasks/current');
@@ -37,6 +34,20 @@ export const liveApi: WorkflowApi = {
   rejectChange(taskId, revision) {
     return request<Task>(`/tasks/${encodeURIComponent(taskId)}/reject`, 'POST', {revision});
   },
-  approveCommit: unavailable,
-  approvePublish: unavailable,
+  reviewCommit(taskId) { return request<Task>(`/tasks/${encodeURIComponent(taskId)}/review-commit`, 'POST'); },
+  async approveCommit(taskId, revision) {
+    const task = await request<Task>('/tasks/current');
+    if (task.id !== taskId || task.revision !== revision || !task.commitReview)
+      throw new Error('Commit review changed; refresh before approving');
+    return request<Task>(`/tasks/${encodeURIComponent(taskId)}/approve-commit`, 'POST',
+      {revision, staged_sha256: task.commitReview.staged_sha256, message: 'fix: correct calculator subtraction'});
+  },
+  reviewPublish(taskId) { return request<Task>(`/tasks/${encodeURIComponent(taskId)}/review-publish`, 'POST'); },
+  async approvePublish(taskId, revision) {
+    const task = await request<Task>('/tasks/current');
+    if (task.id !== taskId || task.revision !== revision || !task.publishReview)
+      throw new Error('Publication review changed; refresh before approving');
+    return request<Task>(`/tasks/${encodeURIComponent(taskId)}/approve-publish`, 'POST',
+      {revision, approval_sha256: task.publishReview.approval_sha256});
+  },
 };
