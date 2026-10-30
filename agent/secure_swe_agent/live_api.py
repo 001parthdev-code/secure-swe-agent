@@ -105,6 +105,14 @@ def create_app(config: LiveConfig) -> FastAPI:
             if len(result.stdout) > 4 * 1024 * 1024:
                 raise RuntimeError('proposal exceeds response limit')
             from .approval import load_proposal
+            try:
+                raw_proposal = json.loads(result.stdout)
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise RuntimeError('agent returned invalid proposal JSON') from exc
+            if raw_proposal.get('status') == 'no_change':
+                raise RuntimeError('Qwen proposed no source change; check whether the fixture is already fixed')
+            if raw_proposal.get('status') == 'invalid_proposal':
+                raise RuntimeError('Qwen did not produce one valid approved-file change')
             proposal = load_proposal(result.stdout)
             change = proposal['changes'][0]
             if change['path'] != 'calculator/calculator.py':
