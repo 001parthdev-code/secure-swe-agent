@@ -23,6 +23,12 @@ function compare(before: string, after: string): DiffLine[] {
 
 export function DiffReview({change}: {change?: Change}) {
   if (!change) return <div className="empty diffEmpty">No proposed changes available.</div>;
+  if (change.diff) return <div className="diff" role="region" aria-label={`Proposed diff for ${change.path}`}>
+    {change.diff.split('\n').filter(Boolean).map((content,index)=>{
+      const kind = content.startsWith('+')&&!content.startsWith('+++')?'added':content.startsWith('-')&&!content.startsWith('---')?'removed':'context';
+      return <div key={index} className={`diffLine ${kind}`}><span aria-hidden="true">{kind==='added'?'+':kind==='removed'?'−':' '}</span><code>{content}</code></div>;
+    })}
+  </div>;
   return <div className="diff" role="region" aria-label={`Proposed diff for ${change.path}`}>
     {compare(change.before, change.after).map((line, index) =>
       <div key={index} className={`diffLine ${line.kind}`}>
