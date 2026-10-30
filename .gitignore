@@ -109,3 +109,6 @@ benchmarks/results/
 # Nested Rust workspace build artifacts
 /enforcer/target/
 /enforcer/isolation-trace-output/
+
+/ui/.vite/
+*.tsbuildinfo
