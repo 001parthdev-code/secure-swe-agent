@@ -30,7 +30,7 @@ class LiveApiTests(unittest.TestCase):
     def test_scope_and_no_writes(self):
         self.assertEqual(self.client.post('/api/tasks', headers=self.headers,
                                         json={'description':'Modify arbitrary files'}).status_code, 422)
-        self.assertEqual(self.client.post('/api/tasks/anything/approve', headers=self.headers).status_code, 409)
+        self.assertEqual(self.client.post('/api/tasks/anything/approve', headers=self.headers, json={'revision':1,'proposal_sha256':'0'*64}).status_code, 404)
 
     def test_no_task(self):
         self.assertEqual(self.client.get('/api/tasks/current', headers=self.headers).json(), {'status':'no_task'})

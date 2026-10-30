@@ -27,8 +27,16 @@ export const liveApi: WorkflowApi = {
     return task.status === 'no_task' ? null as unknown as Task : task as Task;
   },
   startTask(description) { return request<Task>('/tasks', 'POST', {description}); },
-  approveChange: unavailable,
-  rejectChange: unavailable,
+  async approveChange(taskId, revision) {
+    const current = await request<Task>('/tasks/current');
+    if (current.id !== taskId || current.revision !== revision || !current.proposal_sha256)
+      throw new Error('Proposal changed; refresh before approving');
+    return request<Task>(`/tasks/${encodeURIComponent(taskId)}/approve`, 'POST',
+      {revision, proposal_sha256: current.proposal_sha256});
+  },
+  rejectChange(taskId, revision) {
+    return request<Task>(`/tasks/${encodeURIComponent(taskId)}/reject`, 'POST', {revision});
+  },
   approveCommit: unavailable,
   approvePublish: unavailable,
 };

@@ -5,6 +5,8 @@ Not internet-facing. Does not grant filesystem writes, Git or GitHub access.
 from __future__ import annotations
 
 import json
+import hashlib
+import tempfile
 import os
 import re
 import secrets
@@ -18,6 +20,15 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+
+class ApprovalRequest(BaseModel):
+    revision: int = Field(ge=1)
+    proposal_sha256: str = Field(min_length=64, max_length=64)
+
+
+class RejectRequest(BaseModel):
+    revision: int = Field(ge=1)
 
 
 class StartRequest(BaseModel):
@@ -53,6 +64,7 @@ def create_app(config: LiveConfig) -> FastAPI:
     lock = threading.Lock()
     tasks: dict[str, dict[str, Any]] = {}
     active: str | None = None
+    pending: dict[str, bytes] = {}
 
     def authorize(token: str | None) -> None:
         if not token or not secrets.compare_digest(token, config.token):
@@ -61,7 +73,7 @@ def create_app(config: LiveConfig) -> FastAPI:
     @app.get('/api/health')
     def health(x_operator_token: str | None = Header(default=None)):
         authorize(x_operator_token)
-        return {'status': 'ready', 'mode': 'live_readonly', 'enforcer': 'configured'}
+        return {'status': 'ready', 'mode': 'live_approved_fixture', 'enforcer': 'configured'}
 
     @app.get('/api/tasks/current')
     def current(x_operator_token: str | None = Header(default=None)):
@@ -121,6 +133,8 @@ def create_app(config: LiveConfig) -> FastAPI:
             actual = hashlib.sha256(config.fixture.read_bytes()).hexdigest()
             if actual != change['base_sha256']:
                 raise RuntimeError('source changed while proposal was generated')
+            proposal_bytes = result.stdout
+            fingerprint = hashlib.sha256(proposal_bytes).hexdigest()
             change_view = {'path': change['path'], 'before': '', 'after': '',
                            'explanation': change.get('rationale', ''),
                            'diff': change.get('diff', '')}
@@ -129,8 +143,10 @@ def create_app(config: LiveConfig) -> FastAPI:
                 task['status'] = 'awaiting_change_approval'
                 task['revision'] += 1
                 task['changes'] = [change_view]
+                task['proposal_sha256'] = fingerprint
+                pending[task_id] = proposal_bytes
                 task['events'].append({'id': uuid.uuid4().hex, 'timestamp': 'now',
-                    'title': 'Real proposal generated', 'detail': 'Read-only; application disabled in this increment',
+                    'title': 'Real proposal generated', 'detail': 'Exact proposal ready for operator review',
                     'kind': 'success'})
         except (Exception,) as exc:
             with lock:
@@ -140,10 +156,85 @@ def create_app(config: LiveConfig) -> FastAPI:
                 task['events'].append({'id': uuid.uuid4().hex, 'timestamp': 'now',
                     'title': 'Analysis failed', 'detail': str(exc)[:240], 'kind': 'error'})
 
-    @app.post('/api/tasks/{task_id}/approve')
-    def not_enabled(task_id: str, x_operator_token: str | None = Header(default=None)):
+    @app.post('/api/tasks/{task_id}/reject')
+    def reject(task_id: str, payload: RejectRequest,
+               x_operator_token: str | None = Header(default=None)):
         authorize(x_operator_token)
-        raise HTTPException(status_code=409, detail='Live modification approvals are not connected yet')
+        with lock:
+            task = tasks.get(task_id)
+            if task is None:
+                raise HTTPException(404, 'task not found')
+            if task['status'] != 'awaiting_change_approval' or task['revision'] != payload.revision:
+                raise HTTPException(409, 'stale or invalid approval state')
+            task['status'] = 'rejected'
+            task['revision'] += 1
+            pending.pop(task_id, None)
+            task['events'].append({'id': uuid.uuid4().hex, 'timestamp': 'now',
+                'title': 'Change rejected', 'detail': 'No file modification performed', 'kind': 'info'})
+            return dict(task)
+
+    @app.post('/api/tasks/{task_id}/approve')
+    def approve(task_id: str, payload: ApprovalRequest,
+                x_operator_token: str | None = Header(default=None)):
+        authorize(x_operator_token)
+        with lock:
+            task = tasks.get(task_id)
+            if task is None:
+                raise HTTPException(404, 'task not found')
+            if task['status'] != 'awaiting_change_approval' or task['revision'] != payload.revision:
+                raise HTTPException(409, 'stale or invalid approval state')
+            raw = pending.get(task_id)
+            if raw is None or hashlib.sha256(raw).hexdigest() != payload.proposal_sha256 or not secrets.compare_digest(payload.proposal_sha256, task['proposal_sha256']):
+                raise HTTPException(409, 'proposal fingerprint mismatch')
+            # This API intentionally supports a single in-flight operation in one process.
+            task['status'] = 'applying'
+            task['revision'] += 1
+            task['events'].append({'id': uuid.uuid4().hex, 'timestamp': 'now',
+                'title': 'Exact proposal approved', 'detail': 'Linux Enforcer application started', 'kind': 'pending'})
+            pending.pop(task_id, None)
+        threading.Thread(target=apply_task, args=(task_id, raw), daemon=True).start()
+        with lock:
+            return dict(tasks[task_id])
+
+    def apply_task(task_id: str, raw: bytes) -> None:
+        # The trusted workflow checks branch, clean Git tree, base SHA and
+        # version token before requesting any modification from the Enforcer.
+        from . import workflow
+        try:
+            # Proposal artifact is outside the approved repository workspace.
+            with tempfile.TemporaryDirectory(prefix='swe-live2-proposal-') as folder:
+                proposal_path = Path(folder) / 'proposal.json'
+                proposal_path.write_bytes(raw)
+                workflow.prepare(config.repo, proposal_path, 'live-' + task_id[:12])
+                result = workflow.apply(config.repo, proposal_path,
+                                        hashlib.sha256(raw).hexdigest(), config.enforcer)
+            verification = result.get('verification')
+            with lock:
+                task = tasks[task_id]
+                task['revision'] += 1
+                task['branch'] = 'agent/task-live-' + task_id[:12]
+                if result.get('status') == 'verified' and verification and verification.get('verified'):
+                    task['status'] = 'awaiting_commit_approval'
+                    output = verification.get('output', '')
+                    match = re.search(r'Ran (\d+) tests? in ', output)
+                    passed = int(match.group(1)) if match else 0
+                    task['tests'] = {'passed': passed, 'failed': 0, 'output': output[:8192]}
+                    task['events'].append({'id': uuid.uuid4().hex, 'timestamp': 'now',
+                        'title': 'Approved change verified', 'detail': 'Trusted calculator regression suite passed', 'kind': 'success'})
+                else:
+                    task['status'] = 'needs_reconciliation'
+                    task['events'].append({'id': uuid.uuid4().hex, 'timestamp': 'now',
+                        'title': 'Modification requires operator inspection',
+                        'detail': 'Verification or Enforcer operation did not confirm success', 'kind': 'error'})
+        except BaseException as exc:
+            with lock:
+                task = tasks[task_id]
+                task['status'] = 'needs_reconciliation'
+                task['revision'] += 1
+                task['events'].append({'id': uuid.uuid4().hex, 'timestamp': 'now',
+                    'title': 'Operation outcome uncertain',
+                    'detail': str(exc)[:200] + '; inspect repository before retrying', 'kind': 'error'})
+
 
     return app
 
