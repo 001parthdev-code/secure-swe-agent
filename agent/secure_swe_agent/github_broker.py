@@ -33,6 +33,14 @@ def _origin(repo: Path, expected: str) -> str:
             or parsed.port is not None or parsed.query or parsed.fragment
             or parsed.params or parsed.path.endswith("/") or parsed.path.count("/") != 2):
         raise GitBrokerError("origin must be a credential-free HTTPS github.com URL")
+    # Git push prefers remote.origin.pushurl over remote.origin.url.
+    # A separate push destination must never escape the approved repository.
+    try:
+        push_urls = _git(repo, "config", "--local", "--get-all", "remote.origin.pushurl")
+    except GitBrokerError:
+        push_urls = ""
+    if push_urls.strip():
+        raise GitBrokerError("explicit origin pushurl is not permitted")
     path = parsed.path.removeprefix("/").removesuffix(".git")
     if path != expected:
         raise GitBrokerError("origin does not match approved repository")

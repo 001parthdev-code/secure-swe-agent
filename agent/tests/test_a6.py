@@ -46,6 +46,16 @@ class PublishTests(unittest.TestCase):
         with self.assertRaisesRegex(GitBrokerError, "credential-free"):
             preview_publish(self.repo, "example/demo", "main", title="Fix", body="Test")
 
+    def test_different_pushurl_rejected_before_approval(self):
+        git(self.repo, "config", "remote.origin.pushurl", "https://github.com/other/destination.git")
+        with self.assertRaisesRegex(GitBrokerError, "pushurl"):
+            preview_publish(self.repo, "example/demo", "main", title="Fix", body="Test")
+
+    def test_matching_explicit_pushurl_rejected(self):
+        git(self.repo, "config", "remote.origin.pushurl", "https://github.com/example/demo.git")
+        with self.assertRaisesRegex(GitBrokerError, "pushurl"):
+            preview_publish(self.repo, "example/demo", "main", title="Fix", body="Test")
+
     def test_wrong_origin_rejected(self):
         with self.assertRaises(GitBrokerError):
             preview_publish(self.repo, "someone/else", "main", title="Fix", body="Test")
