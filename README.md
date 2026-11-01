@@ -131,8 +131,7 @@ The **entire `enforcer/` tree is frozen** until production-security hardening is
 - [Security considerations](SECURITY.md)
 - [Enforcer subsystem](enforcer/README.md)
 - [Engineering records](docs/README.md)
-- [Release checklist](docs/RELEASE-CHECKLIST-v0.1.0.md)
-- [Changelog](CHANGELOG.md)
+
 
 ## License and commercial use
 
