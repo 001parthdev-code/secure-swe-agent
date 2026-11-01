@@ -1,12 +1,13 @@
 # Secure SWE Agent — Operations, Verification and Next Decisions
 
-_Last updated: 2026-10-26._
+_Updated: 2026-11-01._
 
 ## Developer verification
 
 From the repository root on Windows or Linux:
 
 ```sh
+python -m pip install -r agent/requirements-live.txt httpx2
 python -m unittest discover -s agent/tests -v
 python -m compileall -q agent
 ```
@@ -51,9 +52,9 @@ Do not reuse an already-fixed fixture when claiming to demonstrate bug discovery
 | --- | --- |
 | R4 Security review | Document trust boundaries, risks, mitigations and explicit accepted prototype limitations |
 | R5 Tests/CI | Reproducible cross-platform unit tests, Linux integration, negative authorization and fault-injection evidence |
-| R6 API | Authenticated task creation, state retrieval, immutable review/approve actions, errors, events, and authorization tests |
+| R6 API | Suspended experimental component; not a v0.1.0 release gate |
 | R7 Release | Setup instructions, deployment/runbook, CI evidence, versioned limitations, clean repository |
-| Hosted UI | Browser task-to-PR demo against controlled Linux backend; no CLI steps required of evaluator |
+| Hosted UI | Suspended; no public deployment planned for v0.1.0 |
 
 ## Decision log
 
@@ -61,8 +62,8 @@ Do not reuse an already-fixed fixture when claiming to demonstrate bug discovery
 - Keep the Rust Enforcer **frozen** until the user explicitly authorizes production-grade security work.
 - Preserve human approval at modification, commit and GitHub publication checkpoints.
 - Use Qwen 3.5 4B via local Ollama for the prototype; no paid inference API required for the verified demo.
-- Prioritize robust backend stabilization (R4–R7) before UI integration.
-- Consider Hugging Face Spaces for the frontend and a separately controlled Linux backend; hosting is not yet implemented.
+- Keep the supported v0.1.0 workflow CLI-first; suspend UI/API/launcher development.
+- Defer hosted UI and backend deployment; no production service is claimed.
 
 ## Outstanding documentation questions
 
@@ -71,3 +72,7 @@ Do not reuse an already-fixed fixture when claiming to demonstrate bug discovery
 - Who is the legally correct copyright holder for code contributed by multiple people?
 - Which Linux backend deployment and authentication method will be selected?
 - What security guarantees, if any, will be claimed publicly beyond the trusted-fixture prototype?
+
+## Release procedure
+
+Follow [the v0.1.0 release checklist](RELEASE-CHECKLIST-v0.1.0.md). Do not tag a release until the exact release commit, CI results and Linux verification have been recorded.

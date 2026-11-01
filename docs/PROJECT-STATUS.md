@@ -1,6 +1,6 @@
 # Secure SWE Agent — Verified Status and Open Work
 
-_Last updated: 2026-10-26. Documentation snapshot; not a production-security certification._
+_Updated: 2026-11-01. Release-candidate documentation; not a production-security certification._
 
 ## Product definition
 
@@ -51,13 +51,16 @@ This proves the controlled demonstration path. It does **not** establish reliabl
 
 **Do not modify `enforcer/`** (source, Cargo files, protocol, tests, scripts or configuration) during R4–R7 or UI work. Use its current supported interface. Any incompatible feature must be constrained or deferred until the user explicitly initiates production-security hardening.
 
+## Release-candidate status
+
+R4.1–R4.3 added targeted Git destination, credential isolation and approval-binding checks. R5.1 added full Python CI (Python 3.11 and 3.14). React, FastAPI and the unified launcher exist as experimental code but their development is suspended. The CLI is the supported prototype interface. Release tagging remains conditional on final CI, Linux verification and documentation review.
+
 ## Outstanding milestones
 
-- **R4:** Agent-side security and deployment threat-model review; identify release blockers.
-- **R5:** Adversarial and integration tests, including Linux CI and failure scenarios.
-- **R6:** Durable, authenticated, UI-ready backend API; no direct frontend access to Enforcer or credentials.
-- **R7:** Final documentation, reproducible Linux deployment, acceptance checklist and release evidence.
-- **UI:** Hosted frontend (Hugging Face Spaces is under consideration) with a separately controlled Linux backend. Deployment design is **proposed, not implemented**.
+- **R4:** Targeted hardening implemented; residual trust assumptions remain documented.
+- **R5:** Full Python CI and selected adversarial tests implemented; final release runs pending.
+- **R6/UI:** Experimental implementation suspended; not a v0.1.0 release gate.
+- **R7:** Final Linux verification, release evidence, documentation review and tag pending.
 
 ## Evidence standard
 

@@ -1,6 +1,6 @@
 # Secure SWE Agent — Current Architecture and Trust Boundaries
 
-_Last updated: 2026-10-26._
+_Updated: 2026-11-01._
 
 ## System context
 
@@ -30,7 +30,7 @@ This is a **logical** view, not a claim that every step is currently mediated by
 | Trusted verifier | Execute operator-controlled calculator tests | Run arbitrary hostile repository code |
 | Git broker | Stage/review exact changes and commit on authorized task branches | Direct commits to protected default branch |
 | GitHub broker | Validate destination and approval; push branch and create/recover PR | Force push, expose token to model |
-| Future UI | Present status, diffs, approvals and results | Perform privileged operations directly |
+| Experimental UI (suspended) | Present status, diffs, approvals and results | Perform privileged operations directly |
 
 ## Approval boundaries
 
@@ -50,7 +50,7 @@ Therefore, an interrupted operation should enter a reconciliation-required state
 
 Windows is suitable for local model orchestration, proposal generation, unit tests and frontend development. The approved E2 versioned file-application path has been demonstrated on Linux. The final hosted demo should keep the backend/Enforcer on Linux and expose only a narrowly authenticated application API to the frontend.
 
-## Proposed hosting, not yet deployed
+## Experimental web components — suspended, not deployed
 
 ```mermaid
 flowchart TD
@@ -61,5 +61,7 @@ flowchart TD
   D --> O[Ollama / model endpoint]
   D --> GH[GitHub]
 ```
+
+The repository includes a React UI, FastAPI gateway and development launcher, but these are not the supported v0.1.0 interface and their task state is not durably integrated with the CLI journal. Hosting is deferred.
 
 Do not publicly expose the raw Enforcer protocol, SQLite database, Ollama, Git credentials, or trusted fixture runner. A public UI requires user authentication, per-task authorization, request limits, origin restrictions, auditability and a deployment threat model.
