@@ -14,7 +14,7 @@
 [![E4 Audit](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e4-audit.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-e4-audit.yml)
 [![Linux Integration](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-linux-v01-integration.yml/badge.svg)](https://github.com/001parthdev-code/secure-swe-agent/actions/workflows/enforcer-linux-v01-integration.yml)
 
-> **Project status (October 2026):** The supervised A1–A7 calculator-repair workflow has been demonstrated end to end, including a real GitHub pull request. Agent-side stabilization through R3.4.4 has been reported green. The Rust Enforcer is a **frozen functional prototype**, not a production-secure sandbox. The hosted UI and authenticated backend API are planned, not deployed.
+> **Release candidate (November 2026):** The supervised A1–A7 calculator-repair workflow has been demonstrated end to end, including a real GitHub pull request. R1–R3 stabilization and targeted R4 hardening are implemented; release-gate verification remains. The CLI is the supported prototype interface. React, FastAPI and the development launcher are retained as **experimental, suspended** components, not deployed services. The Rust Enforcer is frozen and is **not** a production-secure sandbox.
 
 ## What it does
 
@@ -56,7 +56,7 @@ Python agent + supervised workflow (agent/)
       `-- GitHub publishing broker ---> approved task branch / PR
 ```
 
-The model does **not** receive GitHub credentials or authorization authority. A future frontend must call a backend that validates server-side approval evidence; it must not invoke privileged tools directly.
+The model does **not** receive GitHub credentials or authorization authority. The experimental frontend must not be treated as an authorization boundary; privileged actions require backend validation.
 
 See [current architecture and trust boundaries](docs/ARCHITECTURE-CURRENT.md).
 
@@ -74,11 +74,12 @@ The Enforcer and agent are **one project in one repository**, not separate produ
 
 ## Developer setup and checks
 
-**Prerequisites:** Python, Git, Rust/Cargo, and Ollama with `qwen3.5:4b` for model-backed tasks. Linux is required for the demonstrated E2 versioned-apply path. The agent's core Python tests use the standard library; follow the individual scripts' help output for workflow-specific arguments.
+**Prerequisites:** Python, Git, Rust/Cargo, and Ollama with `qwen3.5:4b` for model-backed tasks. The complete Python test suite additionally requires `agent/requirements-live.txt` and `httpx2` (as installed in agent release CI). Linux is required for the demonstrated E2 versioned-apply path. The agent's core Python tests use the standard library; follow the individual scripts' help output for workflow-specific arguments.
 
 From the repository root:
 
 ```bash
+python -m pip install -r agent/requirements-live.txt httpx2
 python -m unittest discover -s agent/tests -v
 python -m compileall -q agent
 ```
@@ -105,7 +106,7 @@ For a basic local, read-only agent interaction, see [`agent/README.md`](agent/RE
 | A3 | Diff proposals and supervised E2 application | Versioned apply demonstrated on Linux only |
 | A4 | Trusted calculator regression verification | Not safe for arbitrary untrusted test code |
 | A5–A6 | Approved local Git commits, task-branch push and GitHub PR | Requires operator-controlled repository and credentials |
-| A7 | Complete supervised calculator-to-PR demonstration | CLI checkpoints; no user-facing UI yet |
+| A7 | Complete supervised calculator-to-PR demonstration | CLI supported; browser integration experimental and suspended |
 | R1–R2 | Verification and Git publishing stabilization | Not a general security certification |
 | R3 | SQLite journal, ownership controls, recovery evidence and operator tooling | Uncertain external effects still require trusted reconciliation |
 | Enforcer E1–E4 | Functional Linux integration | Not production-grade hostile-code isolation |
@@ -116,11 +117,10 @@ The **entire `enforcer/` tree is frozen** until production-security hardening is
 
 ## Roadmap
 
-- **R4:** Agent-side security review and deployment threat model.
-- **R5:** Adversarial tests, Linux integration and failure-injection evidence.
-- **R6:** Authenticated, durable backend API suitable for a UI.
-- **R7:** Final documentation, reproducible deployment and release gates.
-- **UI (planned):** Potential Hugging Face Spaces frontend with a separately controlled Linux backend. This is a deployment proposal, not an existing hosted service.
+- **R4:** Targeted agent-side security hardening implemented (push destination, credential filtering, commit-approval binding); residual risks documented.
+- **R5:** Full Python CI and selected adversarial/fault-injection tests implemented; final release evidence still required.
+- **R6/UI:** Experimental React/FastAPI/launcher retained but **suspended and unsupported** for v0.1.0.
+- **R7:** Documentation prepared; final Linux verification, CI evidence, and release tagging pending.
 - **Later, separately authorized:** Production-grade Enforcer hardening and broader execution isolation.
 
 ## Documentation
@@ -131,10 +131,12 @@ The **entire `enforcer/` tree is frozen** until production-security hardening is
 - [Security considerations](SECURITY.md)
 - [Enforcer subsystem](enforcer/README.md)
 - [Engineering records](docs/README.md)
+- [Release checklist](docs/RELEASE-CHECKLIST-v0.1.0.md)
+- [Changelog](CHANGELOG.md)
 
 ## License and commercial use
 
-**Proprietary / all rights reserved.** Do not assume the source is licensed for redistribution, derivative works or commercial use. Refer to the repository's applicable license and ownership notices; obtain written permission from the rights holder for uses requiring authorization.
+Secure SWE Agent source code is licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE) and [NOTICE](NOTICE). The license permits use, modification, redistribution, and commercial use subject to its terms. Third-party dependencies and model weights retain their own applicable licenses; this license does not grant trademark rights or certify the software as production-secure.
 
 ---
 
