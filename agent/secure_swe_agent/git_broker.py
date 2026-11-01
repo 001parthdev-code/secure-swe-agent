@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 import tempfile
@@ -18,6 +19,8 @@ def _git(repo: Path, *args: str) -> str:
         result = subprocess.run(
             ["git", "-c", f"core.hooksPath={hooks}", "-C", str(repo), *args],
             capture_output=True, text=True, timeout=20, check=False,
+            env={k: v for k, v in os.environ.items()
+                 if k not in ("GH_TOKEN", "GITHUB_TOKEN", "SWE_API_TOKEN")},
         )
     if result.returncode:
         raise GitBrokerError(f"git {args[0]} failed (exit {result.returncode})")

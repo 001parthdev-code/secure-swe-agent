@@ -1,6 +1,8 @@
 import subprocess
 import sys
 import tempfile
+import os
+from unittest.mock import patch
 import unittest
 from pathlib import Path
 
@@ -26,6 +28,22 @@ class GitBrokerTests(unittest.TestCase):
         (self.repo / "code.py").write_text("value = 1\n")
         git(self.repo, "add", "code.py")
         git(self.repo, "commit", "-m", "initial")
+
+    def test_git_child_does_not_inherit_operator_tokens(self):
+        from secure_swe_agent.git_broker import _git
+        original_run = subprocess.run
+        seen = []
+
+        def checked_run(*args, **kwargs):
+            seen.append(kwargs.get("env"))
+            return original_run(*args, **kwargs)
+
+        with patch.dict(os.environ, {"GH_TOKEN": "private-gh", "GITHUB_TOKEN": "private-github", "SWE_API_TOKEN": "private-api"}):
+            with patch("secure_swe_agent.git_broker.subprocess.run", side_effect=checked_run):
+                self.assertEqual(_git(self.repo, "rev-parse", "--is-bare-repository").strip(), "false")
+        self.assertEqual(len(seen), 1)
+        for secret in ("GH_TOKEN", "GITHUB_TOKEN", "SWE_API_TOKEN"):
+            self.assertNotIn(secret, seen[0])
 
     def test_approved_local_commit(self):
         self.assertEqual(create_task_branch(self.repo, "fix-1"), "agent/task-fix-1")
