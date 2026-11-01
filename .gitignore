@@ -112,3 +112,8 @@ benchmarks/results/
 
 /ui/.vite/
 *.tsbuildinfo
+
+# Local development and demonstration state
+/.dev-runtime/
+/a7-demo/
+/git-demo/
