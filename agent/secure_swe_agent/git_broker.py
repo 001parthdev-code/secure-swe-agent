@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -70,6 +71,13 @@ def _file(repo: Path, relative: str) -> str:
     return relative
 
 
+def _commit_fingerprint(repo: Path, branch: str, relative: str, diff: str) -> str:
+    """Bind a commit approval to its repository, branch, HEAD and exact diff."""
+    payload = {"repo": str(repo), "branch": branch, "head": _git(repo, "rev-parse", "HEAD").strip(),
+               "path": relative, "diff": diff}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
 def prepare_commit(repo: Path, relative: str) -> dict:
     repo = _root(repo)
     branch = _branch(repo)
@@ -88,7 +96,7 @@ def prepare_commit(repo: Path, relative: str) -> dict:
     diff = _git(repo, "diff", "--cached", "--no-ext-diff", "--", relative)
     if not diff:
         raise GitBrokerError("no staged changes")
-    fingerprint = hashlib.sha256(diff.encode("utf-8")).hexdigest()
+    fingerprint = _commit_fingerprint(repo, branch, relative, diff)
     return {"status": "approval_required", "branch": branch, "path": relative,
             "diff_untrusted": diff, "staged_sha256": fingerprint}
 
@@ -105,7 +113,7 @@ def commit_approved(repo: Path, relative: str, approval: str, message: str) -> d
     if names != [relative]:
         raise GitBrokerError("only the approved file may be staged")
     diff = _git(repo, "diff", "--cached", "--no-ext-diff", "--", relative)
-    if hashlib.sha256(diff.encode("utf-8")).hexdigest() != approval:
+    if _commit_fingerprint(repo, branch, relative, diff) != approval:
         raise GitBrokerError("staged diff changed since approval")
     if _git(repo, "diff", "--", relative):
         raise GitBrokerError("file has unstaged changes")
